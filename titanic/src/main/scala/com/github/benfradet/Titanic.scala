@@ -3,6 +3,7 @@ package com.github.benfradet
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.types._
+import org.apache.spark.sql.functions._
 
 object Titanic {
   val csvFormat = "com.databricks.spark.csv"
@@ -41,14 +42,27 @@ object Titanic {
       .option("header", "true")
       .schema(trainSchema)
       .load(args(0))
+      .drop("PassengerId")
+      .drop("Name")
+      .drop("Ticket")
+      .drop("Cabin")
+
+    val sum: ((Int, Int) => Int) = (a: Int, b: Int) => a + b
+    val sumUDF = udf(sum)
+    val trainDFWithFamilySize = trainDF
+      .withColumn("FamilySize", sumUDF(col("SibSp"), col("Parch")))
 
     val testDF = sqlContext.read
       .format(csvFormat)
       .option("header", "true")
       .schema(testSchema)
       .load(args(1))
+      .drop("PassengerId")
 
-    val selectedData = trainDF.select("PassengerId", "Survived")
+    val numericColumnNames = Seq("Age", "SibSp", "Parch", "Fare")
+    val categoricalColumnNames = Seq("Pclass", "Sex", "Embarked")
+
+    val selectedData = trainDFWithFamilySize.select("SibSp", "Parch", "FamilySize")
     selectedData.write
       .format(csvFormat)
       .option("header", "true")
