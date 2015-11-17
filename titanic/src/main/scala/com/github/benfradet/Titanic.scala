@@ -11,6 +11,9 @@ object Titanic {
 
   def main(args: Array[String]): Unit = {
 
+    Logger.getLogger("org").setLevel(Level.WARN)
+    Logger.getLogger("akka").setLevel(Level.WARN)
+
     if (args.length < 3) {
       System.err.println("Usage: Titanic <train file> <test file> <output file>")
       System.exit(1)
@@ -125,11 +128,5 @@ object Titanic {
 
     trainDFProcessed.select("Title").distinct().show()
     testDFProcessed.select("Title").distinct().show()
-
-    //val selectedData = trainDFProcessed.select("SibSp", "Parch", "FamilySize")
-    //selectedData.write
-    //  .format(csvFormat)
-    //  .option("header", "true")
-    //  .save(args(2))
   }
 }
