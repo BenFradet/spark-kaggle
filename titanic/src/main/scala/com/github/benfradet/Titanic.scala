@@ -1,5 +1,6 @@
 package com.github.benfradet
 
+import org.apache.log4j.{Logger, Level}
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.{Row, SQLContext}
 import org.apache.spark.sql.types._
@@ -58,9 +59,30 @@ object Titanic {
 
     // create a Title column extracting the title from the Name column
     val Pattern = ".*, (.*?)\\..*".r
-    val title: (String => String) = {
-      case Pattern(t) => t
-      case _ => ""
+    val titles = Map(
+      "Mrs"    -> "Mrs",
+      "Lady"   -> "Mrs",
+      "Mme"    -> "Mrs",
+      "Ms"     -> "Ms",
+      "Miss"   -> "Miss",
+      "Mlle"   -> "Miss",
+      "Master" -> "Master",
+      "Rev"    -> "Rev",
+      "Don"    -> "Mr",
+      "Sir"    -> "Sir",
+      "Dr"     -> "Dr",
+      "Col"    -> "Col",
+      "Capt"   -> "Col",
+      "Major"  -> "Col"
+    )
+    val title: ((String, String) => String) = {
+      case (Pattern(t), sex) => titles.get(t) match {
+        case Some(tt) => tt
+        case None     =>
+          if (sex == "male") "Mr"
+          else "Mrs"
+      }
+      case _ => "Mr"
     }
     val titleUDF = udf(title)
 
@@ -89,30 +111,25 @@ object Titanic {
     // process the original DFs
     val trainDFProcessed = trainDF
       .withColumn("FamilySize", familySizeUDF(col("SibSp"), col("Parch")))
-      .withColumn("Title", titleUDF(col("Name")))
+      .withColumn("Title", titleUDF(col("Name"), col("Sex")))
       .na.fill(fillNAMap)
       //.drop("Name")
 
     val testDFProcessed = testDF
       .withColumn("FamilySize", familySizeUDF(col("SibSp"), col("Parch")))
-      .withColumn("Title", titleUDF(col("Name")))
+      .withColumn("Title", titleUDF(col("Name"), col("Sex")))
       .na.fill(fillNAMap)
 
     val numericColumnNames = Seq("Age", "SibSp", "Parch", "Fare")
     val categoricalColumnNames = Seq("Pclass", "Sex", "Embarked")
 
     trainDFProcessed.select("Title").distinct().show()
-    trainDFProcessed.filter(col("Title") === "Jonkheer").select("Name").collect() match {
-      case Array(Row(name: String)) => println(name)
-      case _ => println("not matched")
-    }
-
     testDFProcessed.select("Title").distinct().show()
 
-    val selectedData = trainDFProcessed.select("SibSp", "Parch", "FamilySize")
-    selectedData.write
-      .format(csvFormat)
-      .option("header", "true")
-      .save(args(2))
+    //val selectedData = trainDFProcessed.select("SibSp", "Parch", "FamilySize")
+    //selectedData.write
+    //  .format(csvFormat)
+    //  .option("header", "true")
+    //  .save(args(2))
   }
 }
