@@ -33,17 +33,16 @@ object Titanic {
       StructField("Embarked", StringType, true)
     )
 
+    val trainSchema = StructType(schemaArray)
     val testSchema = StructType(schemaArray.filter(p => p.name != "Survived"))
 
-    val trainSchema = StructType(schemaArray)
-
+    // load data
     val trainDF = sqlContext.read
       .format(csvFormat)
       .option("header", "true")
       .schema(trainSchema)
       .load(args(0))
       .drop("PassengerId")
-      .drop("Name")
       .drop("Ticket")
       .drop("Cabin")
 
@@ -52,16 +51,18 @@ object Titanic {
       .option("header", "true")
       .schema(testSchema)
       .load(args(1))
-      .drop("PassengerId")
 
-    // create a column the sum as the SibSp and Parch columns
-    val familySize: ((Int, Int) => Int) = (sibsp: Int, parch: Int) => sibsp + parch + 1
-    val sumUDF = udf(familySize)
+    // create a FamilySize column as the sum of the SibSp and Parch columns + 1
+    val familySize: ((Int, Int) => Int) = (sibSp: Int, parCh: Int) => sibSp + parCh + 1
+    val familySizeUDF = udf(familySize)
 
-    val trainDFWithFamilySize = trainDF
-      .withColumn("FamilySize", sumUDF(col("SibSp"), col("Parch")))
-    val testDFWithFamilySize = testDF
-      .withColumn("FamilySize", sumUDF(col("SibSp"), col("Parch")))
+    // create a Title column extracting the title from the Name column
+    val Pattern = ".*, (.*?)\\..*".r
+    val title: (String => String) = {
+      case Pattern(t) => t
+      case _ => ""
+    }
+    val titleUDF = udf(title)
 
     // TODO: train a model on the age column
     // fill empty values
@@ -85,13 +86,30 @@ object Titanic {
       "Age"      -> avgAge
     )
 
-    val trainDFFilled = trainDFWithFamilySize.na.fill(fillNAMap)
-    val testDFFilled = testDFWithFamilySize.na.fill(fillNAMap)
+    // process the original DFs
+    val trainDFProcessed = trainDF
+      .withColumn("FamilySize", familySizeUDF(col("SibSp"), col("Parch")))
+      .withColumn("Title", titleUDF(col("Name")))
+      .na.fill(fillNAMap)
+      //.drop("Name")
+
+    val testDFProcessed = testDF
+      .withColumn("FamilySize", familySizeUDF(col("SibSp"), col("Parch")))
+      .withColumn("Title", titleUDF(col("Name")))
+      .na.fill(fillNAMap)
 
     val numericColumnNames = Seq("Age", "SibSp", "Parch", "Fare")
     val categoricalColumnNames = Seq("Pclass", "Sex", "Embarked")
 
-    val selectedData = trainDFWithFamilySize.select("SibSp", "Parch", "FamilySize")
+    trainDFProcessed.select("Title").distinct().show()
+    trainDFProcessed.filter(col("Title") === "Jonkheer").select("Name").collect() match {
+      case Array(Row(name: String)) => println(name)
+      case _ => println("not matched")
+    }
+
+    testDFProcessed.select("Title").distinct().show()
+
+    val selectedData = trainDFProcessed.select("SibSp", "Parch", "FamilySize")
     selectedData.write
       .format(csvFormat)
       .option("header", "true")
