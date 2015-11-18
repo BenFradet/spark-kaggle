@@ -46,9 +46,6 @@ object Titanic {
       .option("header", "true")
       .schema(trainSchema)
       .load(args(0))
-      .drop("PassengerId")
-      .drop("Ticket")
-      .drop("Cabin")
 
     val testDF = sqlContext.read
       .format(csvFormat)
@@ -90,7 +87,7 @@ object Titanic {
     val titleUDF = udf(title)
 
     // TODO: train a model on the age column
-    // fill empty values
+    // udf fill empty values for the age column
     val avgAge = trainDF.select("Age").unionAll(testDF.select("Age"))
       .agg(avg("Age"))
       .collect() match {
@@ -98,6 +95,7 @@ object Titanic {
         case _ => 0
       }
 
+    // udf fill empty values for the fare column
     val avgFare = trainDF.select("Fare").unionAll(testDF.select("Fare"))
       .agg(avg("Fare"))
       .collect() match {
@@ -116,17 +114,23 @@ object Titanic {
       .withColumn("FamilySize", familySizeUDF(col("SibSp"), col("Parch")))
       .withColumn("Title", titleUDF(col("Name"), col("Sex")))
       .na.fill(fillNAMap)
-      //.drop("Name")
+      .drop("Name")
+      .drop("Ticket")
+      .drop("Cabin")
 
     val testDFProcessed = testDF
       .withColumn("FamilySize", familySizeUDF(col("SibSp"), col("Parch")))
       .withColumn("Title", titleUDF(col("Name"), col("Sex")))
       .na.fill(fillNAMap)
+      .drop("Name")
+      .drop("Ticket")
+      .drop("Cabin")
 
-    val numericColumnNames = Seq("Age", "SibSp", "Parch", "Fare")
-    val categoricalColumnNames = Seq("Pclass", "Sex", "Embarked")
+    trainDFProcessed.show(5)
+    testDFProcessed.show(5)
 
-    trainDFProcessed.select("Title").distinct().show()
-    testDFProcessed.select("Title").distinct().show()
+    val numericColumnNames = Seq("Age", "SibSp", "Parch", "Fare", "FamilySize")
+    val categoricalColumnNames = Seq("Pclass", "Sex", "Embarked", "Title")
+    val allColumnNames = numericColumnNames ++ categoricalColumnNames
   }
 }
