@@ -53,11 +53,11 @@ object Titanic {
       .schema(testSchema)
       .load(args(1))
 
-    // create a FamilySize column as the sum of the SibSp and Parch columns + 1
+    // udf to create a FamilySize column as the sum of the SibSp and Parch columns + 1
     val familySize: ((Int, Int) => Int) = (sibSp: Int, parCh: Int) => sibSp + parCh + 1
     val familySizeUDF = udf(familySize)
 
-    // create a Title column extracting the title from the Name column
+    // udf to create a Title column extracting the title from the Name column
     val Pattern = ".*, (.*?)\\..*".r
     val titles = Map(
       "Mrs"    -> "Mrs",
@@ -86,8 +86,12 @@ object Titanic {
     }
     val titleUDF = udf(title)
 
+    // udf to create a survived column in the test df
+    val survived: (Int => Int) = (_: Int) => 0
+    val survivedUDF = udf(survived)
+
     // TODO: train a model on the age column
-    // udf fill empty values for the age column
+    // fill empty values for the age column
     val avgAge = trainDF.select("Age").unionAll(testDF.select("Age"))
       .agg(avg("Age"))
       .collect() match {
@@ -95,7 +99,7 @@ object Titanic {
         case _ => 0
       }
 
-    // udf fill empty values for the fare column
+    // fill empty values for the fare column
     val avgFare = trainDF.select("Fare").unionAll(testDF.select("Fare"))
       .agg(avg("Fare"))
       .collect() match {
@@ -103,6 +107,8 @@ object Titanic {
         case _ => 0
       }
 
+
+    // map to fill na values
     val fillNAMap = Map(
       "Embarked" -> "S",
       "Fare"     -> avgFare,
@@ -121,6 +127,7 @@ object Titanic {
     val testDFProcessed = testDF
       .withColumn("FamilySize", familySizeUDF(col("SibSp"), col("Parch")))
       .withColumn("Title", titleUDF(col("Name"), col("Sex")))
+      //.withColumn("Survived", survivedUDF(col("PassengerId")))
       .na.fill(fillNAMap)
       .drop("Name")
       .drop("Ticket")
