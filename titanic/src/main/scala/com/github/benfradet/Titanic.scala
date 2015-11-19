@@ -1,8 +1,9 @@
 package com.github.benfradet
 
 import org.apache.log4j.{Logger, Level}
+import org.apache.spark.ml.feature.StringIndexer
 import org.apache.spark.{SparkConf, SparkContext}
-import org.apache.spark.sql.{Row, SQLContext}
+import org.apache.spark.sql.{DataFrame, Column, Row, SQLContext}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.functions._
 
@@ -20,39 +21,54 @@ object Titanic {
     }
 
     val sc = new SparkContext(new SparkConf().setAppName("Titanic"))
-    val sqlContext = new SQLContext(sc)
 
-    val schemaArray = Array(
-      StructField("PassengerId", IntegerType, true),
-      StructField("Survived", IntegerType, true),
-      StructField("Pclass", IntegerType, true),
-      StructField("Name", StringType, true),
-      StructField("Sex", StringType, true),
-      StructField("Age", FloatType, true),
-      StructField("SibSp", IntegerType, true),
-      StructField("Parch", IntegerType, true),
-      StructField("Ticket", StringType, true),
-      StructField("Fare", FloatType, true),
-      StructField("Cabin", StringType, true),
-      StructField("Embarked", StringType, true)
+    val (trainDFRaw, testDFRaw) = loadData(args(0), args(1), sc)
+
+    val (trainDFExtra, testDFExtra) = createExtraFeatures(trainDFRaw, testDFRaw)
+
+    val (trainDFCompleted, testDFCompleted) = fillNAValues(trainDFExtra, testDFExtra)
+
+    val numericFeatures = Seq("Age", "SibSp", "Parch", "Fare", "FamilySize")
+    val categoricalFeatures = Seq("Pclass", "Sex", "Embarked", "Title")
+    val allColumnNames = numericFeatures ++ categoricalFeatures
+
+    val trainingFiltered = trainDFCompleted.select("Survived", allColumnNames: _*)
+    trainingFiltered.show(5)
+
+    val labelIndexer = new StringIndexer()
+      .setInputCol("Survived")
+      .setOutputCol("SurvivedIndex")
+  }
+
+  def fillNAValues(trainDF: DataFrame, testDF: DataFrame): (DataFrame, DataFrame) = {
+    // TODO: train a model on the age column
+    // fill empty values for the age column
+    val avgAge = trainDF.select("Age").unionAll(testDF.select("Age"))
+      .agg(avg("Age"))
+      .collect() match {
+      case Array(Row(avg: Double)) => avg
+      case _ => 0
+    }
+
+    // fill empty values for the fare column
+    val avgFare = trainDF.select("Fare").unionAll(testDF.select("Fare"))
+      .agg(avg("Fare"))
+      .collect() match {
+      case Array(Row(avg: Double)) => avg
+      case _ => 0
+    }
+
+    // map to fill na values
+    val fillNAMap = Map(
+      "Embarked" -> "S",
+      "Fare"     -> avgFare,
+      "Age"      -> avgAge
     )
 
-    val trainSchema = StructType(schemaArray)
-    val testSchema = StructType(schemaArray.filter(p => p.name != "Survived"))
+    (trainDF.na.fill(fillNAMap), testDF.na.fill(fillNAMap))
+  }
 
-    // load data
-    val trainDF = sqlContext.read
-      .format(csvFormat)
-      .option("header", "true")
-      .schema(trainSchema)
-      .load(args(0))
-
-    val testDF = sqlContext.read
-      .format(csvFormat)
-      .option("header", "true")
-      .schema(testSchema)
-      .load(args(1))
-
+  def createExtraFeatures(trainDF: DataFrame, testDF: DataFrame): (DataFrame, DataFrame) = {
     // udf to create a FamilySize column as the sum of the SibSp and Parch columns + 1
     val familySize: ((Int, Int) => Int) = (sibSp: Int, parCh: Int) => sibSp + parCh + 1
     val familySizeUDF = udf(familySize)
@@ -86,58 +102,53 @@ object Titanic {
     }
     val titleUDF = udf(title)
 
-    // udf to create a survived column in the test df
-    val survived: (Int => Int) = (_: Int) => 0
-    val survivedUDF = udf(survived)
+    val newTrainDF = trainDF
+      .withColumn("FamilySize", familySizeUDF(col("SibSp"), col("Parch")))
+      .withColumn("Title", titleUDF(col("Name"), col("Sex")))
+    val newTestDF = testDF
+      .withColumn("FamilySize", familySizeUDF(col("SibSp"), col("Parch")))
+      .withColumn("Title", titleUDF(col("Name"), col("Sex")))
 
-    // TODO: train a model on the age column
-    // fill empty values for the age column
-    val avgAge = trainDF.select("Age").unionAll(testDF.select("Age"))
-      .agg(avg("Age"))
-      .collect() match {
-        case Array(Row(avg: Double)) => avg
-        case _ => 0
-      }
+    (newTrainDF, newTestDF)
+  }
 
-    // fill empty values for the fare column
-    val avgFare = trainDF.select("Fare").unionAll(testDF.select("Fare"))
-      .agg(avg("Fare"))
-      .collect() match {
-        case Array(Row(avg: Double)) => avg
-        case _ => 0
-      }
-
-
-    // map to fill na values
-    val fillNAMap = Map(
-      "Embarked" -> "S",
-      "Fare"     -> avgFare,
-      "Age"      -> avgAge
+  def loadData(
+    trainFile: String,
+    testFile: String,
+    sc: SparkContext
+  ): (DataFrame, DataFrame) = {
+    val sqlContext = new SQLContext(sc)
+    val schemaArray = Array(
+      StructField("PassengerId", IntegerType, true),
+      StructField("Survived", IntegerType, true),
+      StructField("Pclass", IntegerType, true),
+      StructField("Name", StringType, true),
+      StructField("Sex", StringType, true),
+      StructField("Age", FloatType, true),
+      StructField("SibSp", IntegerType, true),
+      StructField("Parch", IntegerType, true),
+      StructField("Ticket", StringType, true),
+      StructField("Fare", FloatType, true),
+      StructField("Cabin", StringType, true),
+      StructField("Embarked", StringType, true)
     )
 
-    // process the original DFs
-    val trainDFProcessed = trainDF
-      .withColumn("FamilySize", familySizeUDF(col("SibSp"), col("Parch")))
-      .withColumn("Title", titleUDF(col("Name"), col("Sex")))
-      .na.fill(fillNAMap)
-      .drop("Name")
-      .drop("Ticket")
-      .drop("Cabin")
+    val trainSchema = StructType(schemaArray)
+    val testSchema = StructType(schemaArray.filter(p => p.name != "Survived"))
 
-    val testDFProcessed = testDF
-      .withColumn("FamilySize", familySizeUDF(col("SibSp"), col("Parch")))
-      .withColumn("Title", titleUDF(col("Name"), col("Sex")))
-      //.withColumn("Survived", survivedUDF(col("PassengerId")))
-      .na.fill(fillNAMap)
-      .drop("Name")
-      .drop("Ticket")
-      .drop("Cabin")
+    // load data
+    val trainDF = sqlContext.read
+      .format(csvFormat)
+      .option("header", "true")
+      .schema(trainSchema)
+      .load(trainFile)
 
-    trainDFProcessed.show(5)
-    testDFProcessed.show(5)
+    val testDF = sqlContext.read
+      .format(csvFormat)
+      .option("header", "true")
+      .schema(testSchema)
+      .load(testFile)
 
-    val numericColumnNames = Seq("Age", "SibSp", "Parch", "Fare", "FamilySize")
-    val categoricalColumnNames = Seq("Pclass", "Sex", "Embarked", "Title")
-    val allColumnNames = numericColumnNames ++ categoricalColumnNames
+    (trainDF, testDF)
   }
 }
