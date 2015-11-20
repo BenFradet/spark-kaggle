@@ -1,9 +1,11 @@
 package com.github.benfradet
 
 import org.apache.log4j.{Logger, Level}
-import org.apache.spark.ml.feature.{VectorIndexer, VectorAssembler, StringIndexer}
+import org.apache.spark.ml.Pipeline
+import org.apache.spark.ml.classification.{DecisionTreeClassificationModel, DecisionTreeClassifier}
+import org.apache.spark.ml.feature.{IndexToString, VectorIndexer, VectorAssembler, StringIndexer}
 import org.apache.spark.{SparkConf, SparkContext}
-import org.apache.spark.sql.{DataFrame, Column, Row, SQLContext}
+import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.functions._
 
@@ -30,31 +32,95 @@ object Titanic {
 
     val numericFeatColNames = Seq("Age", "SibSp", "Parch", "Fare", "FamilySize")
     val categoricalFeatColNames = Seq("Pclass", "Sex", "Embarked", "Title")
+    val idxdCategoricalFeatColName = categoricalFeatColNames.map(_ + "Indexed")
     val allFeatColNames = numericFeatColNames ++ categoricalFeatColNames
+    val allIdxdFeatColNames = numericFeatColNames ++ idxdCategoricalFeatColName
 
     val labelColName = "SurvivedString"
 
     val trainDFFiltered = trainDFCompleted.select(labelColName, allFeatColNames: _*)
+    val testDFFiltered = testDFCompleted.select(labelColName, allFeatColNames: _*)
+
+    val (trainDFIndexed, testDFIndexed) =
+      indexCategoricalFeatures(trainDFFiltered, testDFFiltered, categoricalFeatColNames)
 
     // vector assembler
     val assembler = new VectorAssembler()
-      .setInputCols(Array(allFeatColNames: _*))
+      .setInputCols(Array(allIdxdFeatColNames: _*))
       .setOutputCol("Features")
+
+    // transform the dataframe with the previously defined assembler
+    val trainDFAssembled = assembler.transform(trainDFIndexed)
+    trainDFAssembled.cache()
+    val testDFAssembled = assembler.transform(testDFIndexed)
+    testDFAssembled.cache()
+
+    val data = trainDFAssembled.unionAll(testDFAssembled)
+    data.cache()
 
     // index classes
     val labelIndexer = new StringIndexer()
       .setInputCol(labelColName)
       .setOutputCol("SurvivedIndexed")
+      .fit(data)
 
     // identify categorical features
     val featuresIndexer = new VectorIndexer()
       .setInputCol("Features")
       .setOutputCol("FeaturesIndexed")
       .setMaxCategories(10)
+      .fit(data)
 
-    trainDFFiltered.cache()
-    val filled = trainDFFiltered.na.fill(Map("Embarked" -> "S"))
-    filled.select("Embarked").distinct().show()
+    val decisionTree = new DecisionTreeClassifier()
+      .setLabelCol("SurvivedIndexed")
+      .setFeaturesCol("FeaturesIndexed")
+
+    val labelConverter = new IndexToString()
+      .setInputCol("prediction")
+      .setOutputCol("predictedLabel")
+      .setLabels(labelIndexer.labels)
+
+    // define the order of the operations to be performed
+    val pipeline = new Pipeline()
+      .setStages(Array(labelIndexer, featuresIndexer, decisionTree, labelConverter))
+
+    // train the model
+    val model = pipeline.fit(trainDFAssembled)
+
+    // make predictions
+    val predictions = model.transform(testDFAssembled)
+
+    predictions.select("predictedLabel", "Features").show(5)
+
+    val treeModel = model.stages(2).asInstanceOf[DecisionTreeClassificationModel]
+    println("Learned classification model:\n" + treeModel.toDebugString)
+  }
+
+  def indexCategoricalFeatures(
+    trainDF: DataFrame,
+    testDF: DataFrame,
+    categoricalFeatColNames: Seq[String]
+  ): (DataFrame, DataFrame) = {
+    val dataFiltered = trainDF.unionAll(testDF)
+
+    var oldTrainDF = trainDF
+    var newTrainDF = trainDF
+    var oldTestDF = testDF
+    var newTestDF = testDF
+    categoricalFeatColNames
+      .map(colName => new StringIndexer()
+      .setInputCol(colName)
+      .setOutputCol(colName + "Indexed")
+      .fit(dataFiltered)
+      )
+      .foreach { stringIndexer =>
+      newTrainDF = stringIndexer.transform(oldTrainDF)
+      newTestDF = stringIndexer.transform(oldTestDF)
+      oldTrainDF = newTrainDF
+      oldTestDF = newTestDF
+    }
+
+    (newTrainDF, newTestDF)
   }
 
   def fillNAValues(trainDF: DataFrame, testDF: DataFrame): (DataFrame, DataFrame) = {
@@ -77,7 +143,6 @@ object Titanic {
 
     // map to fill na values
     val fillNAMap = Map(
-      "Embarked" -> "S",
       "Fare"     -> avgFare,
       "Age"      -> avgAge
     )
@@ -152,19 +217,20 @@ object Titanic {
     sc: SparkContext
   ): (DataFrame, DataFrame) = {
     val sqlContext = new SQLContext(sc)
+    val nullable = true
     val schemaArray = Array(
-      StructField("PassengerId", IntegerType, true),
-      StructField("Survived", IntegerType, true),
-      StructField("Pclass", IntegerType, true),
-      StructField("Name", StringType, true),
-      StructField("Sex", StringType, true),
-      StructField("Age", FloatType, true),
-      StructField("SibSp", IntegerType, true),
-      StructField("Parch", IntegerType, true),
-      StructField("Ticket", StringType, true),
-      StructField("Fare", FloatType, true),
-      StructField("Cabin", StringType, true),
-      StructField("Embarked", StringType, true)
+      StructField("PassengerId", IntegerType, nullable),
+      StructField("Survived", IntegerType, nullable),
+      StructField("Pclass", IntegerType, nullable),
+      StructField("Name", StringType, nullable),
+      StructField("Sex", StringType, nullable),
+      StructField("Age", FloatType, nullable),
+      StructField("SibSp", IntegerType, nullable),
+      StructField("Parch", IntegerType, nullable),
+      StructField("Ticket", StringType, nullable),
+      StructField("Fare", FloatType, nullable),
+      StructField("Cabin", StringType, nullable),
+      StructField("Embarked", StringType, nullable)
     )
 
     val trainSchema = StructType(schemaArray)
