@@ -1,7 +1,7 @@
 package com.github.benfradet
 
 import org.apache.log4j.{Logger, Level}
-import org.apache.spark.ml.feature.StringIndexer
+import org.apache.spark.ml.feature.{VectorIndexer, VectorAssembler, StringIndexer}
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.{DataFrame, Column, Row, SQLContext}
 import org.apache.spark.sql.types._
@@ -28,16 +28,33 @@ object Titanic {
 
     val (trainDFCompleted, testDFCompleted) = fillNAValues(trainDFExtra, testDFExtra)
 
-    val numericFeatures = Seq("Age", "SibSp", "Parch", "Fare", "FamilySize")
-    val categoricalFeatures = Seq("Pclass", "Sex", "Embarked", "Title")
-    val allColumnNames = numericFeatures ++ categoricalFeatures
+    val numericFeatColNames = Seq("Age", "SibSp", "Parch", "Fare", "FamilySize")
+    val categoricalFeatColNames = Seq("Pclass", "Sex", "Embarked", "Title")
+    val allFeatColNames = numericFeatColNames ++ categoricalFeatColNames
 
-    val trainingFiltered = trainDFCompleted.select("Survived", allColumnNames: _*)
-    trainingFiltered.show(5)
+    val labelColName = "SurvivedString"
 
+    val trainDFFiltered = trainDFCompleted.select(labelColName, allFeatColNames: _*)
+
+    // vector assembler
+    val assembler = new VectorAssembler()
+      .setInputCols(Array(allFeatColNames: _*))
+      .setOutputCol("Features")
+
+    // index classes
     val labelIndexer = new StringIndexer()
-      .setInputCol("Survived")
-      .setOutputCol("SurvivedIndex")
+      .setInputCol(labelColName)
+      .setOutputCol("SurvivedIndexed")
+
+    // identify categorical features
+    val featuresIndexer = new VectorIndexer()
+      .setInputCol("Features")
+      .setOutputCol("FeaturesIndexed")
+      .setMaxCategories(10)
+
+    trainDFFiltered.cache()
+    val filled = trainDFFiltered.na.fill(Map("Embarked" -> "S"))
+    filled.select("Embarked").distinct().show()
   }
 
   def fillNAValues(trainDF: DataFrame, testDF: DataFrame): (DataFrame, DataFrame) = {
@@ -65,7 +82,22 @@ object Titanic {
       "Age"      -> avgAge
     )
 
-    (trainDF.na.fill(fillNAMap), testDF.na.fill(fillNAMap))
+    // udf to fill empty embarked string with S corresponding to Southampton
+    val embarked: (String => String) = {
+      case "" => "S"
+      case a  => a
+    }
+    val embarkedUDF = udf(embarked)
+
+    val newTrainDF = trainDF
+      .na.fill(fillNAMap)
+      .withColumn("Embarked", embarkedUDF(col("Embarked")))
+
+    val newTestDF = testDF
+      .na.fill(fillNAMap)
+      .withColumn("Embarked", embarkedUDF(col("Embarked")))
+
+    (newTrainDF, newTestDF)
   }
 
   def createExtraFeatures(trainDF: DataFrame, testDF: DataFrame): (DataFrame, DataFrame) = {
@@ -105,9 +137,11 @@ object Titanic {
     val newTrainDF = trainDF
       .withColumn("FamilySize", familySizeUDF(col("SibSp"), col("Parch")))
       .withColumn("Title", titleUDF(col("Name"), col("Sex")))
+      .withColumn("SurvivedString", trainDF("Survived").cast(StringType))
     val newTestDF = testDF
       .withColumn("FamilySize", familySizeUDF(col("SibSp"), col("Parch")))
       .withColumn("Title", titleUDF(col("Name"), col("Sex")))
+      .withColumn("SurvivedString", lit("").cast(StringType))
 
     (newTrainDF, newTestDF)
   }
