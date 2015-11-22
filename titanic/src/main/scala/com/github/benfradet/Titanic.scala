@@ -37,9 +37,12 @@ object Titanic {
     val allIdxdFeatColNames = numericFeatColNames ++ idxdCategoricalFeatColName
 
     val labelColName = "SurvivedString"
+    val idColName = "PassengerId"
 
-    val trainDFFiltered = trainDFCompleted.select(labelColName, allFeatColNames: _*)
-    val testDFFiltered = testDFCompleted.select(labelColName, allFeatColNames: _*)
+    val allPredictColNames = allFeatColNames ++ Seq(idColName)
+
+    val trainDFFiltered = trainDFCompleted.select(labelColName, allPredictColNames: _*)
+    val testDFFiltered = testDFCompleted.select(labelColName, allPredictColNames: _*)
 
     val (trainDFIndexed, testDFIndexed) =
       indexCategoricalFeatures(trainDFFiltered, testDFFiltered, categoricalFeatColNames)
@@ -90,10 +93,18 @@ object Titanic {
     // make predictions
     val predictions = model.transform(testDFAssembled)
 
-    predictions.select("predictedLabel", "Features").show(5)
+    predictions.select("predictedLabel", "Features").show(5, false)
 
     val treeModel = model.stages(2).asInstanceOf[DecisionTreeClassificationModel]
     println("Learned classification model:\n" + treeModel.toDebugString)
+
+    predictions
+      .withColumn("Survived", col("predictedLabel"))
+      .select("PassengerId", "Survived")
+      .write
+      .format(csvFormat)
+      .option("header", "true")
+      .save(args(2))
   }
 
   def indexCategoricalFeatures(
