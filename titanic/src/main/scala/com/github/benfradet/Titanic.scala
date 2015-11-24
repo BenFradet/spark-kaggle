@@ -3,7 +3,9 @@ package com.github.benfradet
 import org.apache.log4j.{Logger, Level}
 import org.apache.spark.ml.Pipeline
 import org.apache.spark.ml.classification.{DecisionTreeClassificationModel, DecisionTreeClassifier}
+import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
 import org.apache.spark.ml.feature.{IndexToString, VectorIndexer, VectorAssembler, StringIndexer}
+import org.apache.spark.ml.tuning.{CrossValidator, ParamGridBuilder}
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
 import org.apache.spark.sql.types._
@@ -18,17 +20,17 @@ object Titanic {
     Logger.getLogger("akka").setLevel(Level.WARN)
 
     if (args.length < 3) {
-      System.err.println("Usage: Titanic <train file> <test file> <output file>")
+      System.err.println("Usage: Titanic <train file> <predict file> <output file>")
       System.exit(1)
     }
 
     val sc = new SparkContext(new SparkConf().setAppName("Titanic"))
 
-    val (trainDFRaw, testDFRaw) = loadData(args(0), args(1), sc)
+    val (dataDFRaw, predictDFRaw) = loadData(args(0), args(1), sc)
 
-    val (trainDFExtra, testDFExtra) = createExtraFeatures(trainDFRaw, testDFRaw)
+    val (dataDFExtra, predictDFExtra) = createExtraFeatures(dataDFRaw, predictDFRaw)
 
-    val (trainDFCompleted, testDFCompleted) = fillNAValues(trainDFExtra, testDFExtra)
+    val (dataDFCompleted, predictDFCompleted) = fillNAValues(dataDFExtra, predictDFExtra)
 
     val numericFeatColNames = Seq("Age", "SibSp", "Parch", "Fare", "FamilySize")
     val categoricalFeatColNames = Seq("Pclass", "Sex", "Embarked", "Title")
@@ -41,11 +43,11 @@ object Titanic {
 
     val allPredictColNames = allFeatColNames ++ Seq(idColName)
 
-    val trainDFFiltered = trainDFCompleted.select(labelColName, allPredictColNames: _*)
-    val testDFFiltered = testDFCompleted.select(labelColName, allPredictColNames: _*)
+    val dataDFFiltered = dataDFCompleted.select(labelColName, allPredictColNames: _*)
+    val predictDFFiltered = predictDFCompleted.select(labelColName, allPredictColNames: _*)
 
-    val (trainDFIndexed, testDFIndexed) =
-      indexCategoricalFeatures(trainDFFiltered, testDFFiltered, categoricalFeatColNames)
+    val (dataDFIndexed, predictDFIndexed) =
+      indexCategoricalFeatures(dataDFFiltered, predictDFFiltered, categoricalFeatColNames)
 
     // vector assembler
     val assembler = new VectorAssembler()
@@ -53,26 +55,26 @@ object Titanic {
       .setOutputCol("Features")
 
     // transform the dataframe with the previously defined assembler
-    val trainDFAssembled = assembler.transform(trainDFIndexed)
-    trainDFAssembled.cache()
-    val testDFAssembled = assembler.transform(testDFIndexed)
-    testDFAssembled.cache()
+    val dataDFAssembled = assembler.transform(dataDFIndexed)
+    dataDFAssembled.cache()
+    val predictDFAssembled = assembler.transform(predictDFIndexed)
+    predictDFAssembled.cache()
 
-    val data = trainDFAssembled.unionAll(testDFAssembled)
-    data.cache()
+    val allData = dataDFAssembled.unionAll(predictDFAssembled)
+    allData.cache()
 
     // index classes
     val labelIndexer = new StringIndexer()
       .setInputCol(labelColName)
       .setOutputCol("SurvivedIndexed")
-      .fit(data)
+      .fit(allData)
 
     // identify categorical features
     val featuresIndexer = new VectorIndexer()
       .setInputCol("Features")
       .setOutputCol("FeaturesIndexed")
       .setMaxCategories(10)
-      .fit(data)
+      .fit(allData)
 
     val decisionTree = new DecisionTreeClassifier()
       .setLabelCol("SurvivedIndexed")
@@ -87,15 +89,29 @@ object Titanic {
     val pipeline = new Pipeline()
       .setStages(Array(labelIndexer, featuresIndexer, decisionTree, labelConverter))
 
+    // grid of values to perform cross validation on
+    val paramGrid = new ParamGridBuilder()
+      .addGrid(decisionTree.impurity, Array("entropy", "gini"))
+      .addGrid(decisionTree.maxBins, Array(10, 15, 20, 25, 30))
+      .addGrid(decisionTree.maxDepth, Array(3, 5, 7, 9, 11))
+      .addGrid(decisionTree.minInfoGain, Array(0, 0.01, 0.1, 0.5, 1))
+      .build()
+
+    val cv = new CrossValidator()
+      .setEstimator(pipeline)
+      .setEvaluator(new BinaryClassificationEvaluator)
+      .setEstimatorParamMaps(paramGrid)
+      .setNumFolds(10)
+
     // train the model
-    val model = pipeline.fit(trainDFAssembled)
+    val crossValidatorModel = cv.fit(dataDFAssembled)
 
     // make predictions
-    val predictions = model.transform(testDFAssembled)
+    val predictions = crossValidatorModel.transform(predictDFAssembled)
 
     predictions.select("predictedLabel", "Features").show(5, false)
 
-    val treeModel = model.stages(2).asInstanceOf[DecisionTreeClassificationModel]
+    val treeModel = crossValidatorModel.bestModel.asInstanceOf[DecisionTreeClassificationModel]
     println("Learned classification model:\n" + treeModel.toDebugString)
 
     predictions
