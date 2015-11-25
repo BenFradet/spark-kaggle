@@ -99,7 +99,7 @@ object Titanic {
 
     val cv = new CrossValidator()
       .setEstimator(pipeline)
-      .setEvaluator(new BinaryClassificationEvaluator)
+      .setEvaluator(new BinaryClassificationEvaluator().setLabelCol("SurvivedIndexed"))
       .setEstimatorParamMaps(paramGrid)
       .setNumFolds(10)
 
@@ -110,9 +110,6 @@ object Titanic {
     val predictions = crossValidatorModel.transform(predictDFAssembled)
 
     predictions.select("predictedLabel", "Features").show(5, false)
-
-    val treeModel = crossValidatorModel.bestModel.asInstanceOf[DecisionTreeClassificationModel]
-    println("Learned classification model:\n" + treeModel.toDebugString)
 
     predictions
       .withColumn("Survived", col("predictedLabel"))
