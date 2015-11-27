@@ -2,7 +2,7 @@ package com.github.benfradet
 
 import org.apache.log4j.{Logger, Level}
 import org.apache.spark.ml.Pipeline
-import org.apache.spark.ml.classification.{DecisionTreeClassificationModel, DecisionTreeClassifier}
+import org.apache.spark.ml.classification.RandomForestClassifier
 import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
 import org.apache.spark.ml.feature.{IndexToString, VectorIndexer, VectorAssembler, StringIndexer}
 import org.apache.spark.ml.tuning.{CrossValidator, ParamGridBuilder}
@@ -76,7 +76,7 @@ object Titanic {
       .setMaxCategories(10)
       .fit(allData)
 
-    val decisionTree = new DecisionTreeClassifier()
+    val randomForest = new RandomForestClassifier()
       .setLabelCol("SurvivedIndexed")
       .setFeaturesCol("FeaturesIndexed")
 
@@ -87,15 +87,15 @@ object Titanic {
 
     // define the order of the operations to be performed
     val pipeline = new Pipeline()
-      .setStages(Array(labelIndexer, featuresIndexer, decisionTree, labelConverter))
+      .setStages(Array(labelIndexer, featuresIndexer, randomForest, labelConverter))
 
     // grid of values to perform cross validation on
     val paramGrid = new ParamGridBuilder()
-      .addGrid(decisionTree.impurity, Array("entropy", "gini"))
-      .addGrid(decisionTree.maxBins, Array(10, 15, 20, 25, 30))
-      .addGrid(decisionTree.maxDepth, Array(3, 5, 7, 9, 11))
-      .addGrid(decisionTree.minInfoGain, Array(0, 0.01, 0.1, 0.5, 1))
-      .build()
+        .addGrid(randomForest.impurity, Array("entropy", "gini"))
+        .addGrid(randomForest.maxBins, Array(10, 15, 20, 25, 30))
+        .addGrid(randomForest.maxDepth, Array(3, 5, 7, 9, 11))
+        .addGrid(randomForest.minInfoGain, Array(0, 0.01, 0.1, 0.5, 1))
+        .build()
 
     val cv = new CrossValidator()
       .setEstimator(pipeline)
