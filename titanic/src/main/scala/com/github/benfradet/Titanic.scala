@@ -116,7 +116,7 @@ object Titanic {
     predictions.select("predictedLabel", featColName).show(5, false)
 
     predictions
-      .withColumn(labelColName, col("predictedLabel"))
+      .withColumn("Survived", col("predictedLabel"))
       .select("PassengerId", "Survived")
       .write
       .format(csvFormat)
