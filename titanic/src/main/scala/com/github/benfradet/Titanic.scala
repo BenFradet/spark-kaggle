@@ -39,6 +39,7 @@ object Titanic {
     val allIdxdFeatColNames = numericFeatColNames ++ idxdCategoricalFeatColName
 
     val labelColName = "SurvivedString"
+    val featColName = "Features"
     val idColName = "PassengerId"
 
     val allPredictColNames = allFeatColNames ++ Seq(idColName)
@@ -52,7 +53,7 @@ object Titanic {
     // vector assembler
     val assembler = new VectorAssembler()
       .setInputCols(Array(allIdxdFeatColNames: _*))
-      .setOutputCol("Features")
+      .setOutputCol(featColName)
 
     // transform the dataframe with the previously defined assembler
     val dataDFAssembled = assembler.transform(dataDFIndexed)
@@ -63,22 +64,25 @@ object Titanic {
     val allData = dataDFAssembled.unionAll(predictDFAssembled)
     allData.cache()
 
+    val idxdLabelColName = "SurvivedIndexed"
+    val idxdFeatColName = "FeaturesIndexed"
+
     // index classes
     val labelIndexer = new StringIndexer()
       .setInputCol(labelColName)
-      .setOutputCol("SurvivedIndexed")
+      .setOutputCol(idxdLabelColName)
       .fit(allData)
 
     // identify categorical features
     val featuresIndexer = new VectorIndexer()
-      .setInputCol("Features")
-      .setOutputCol("FeaturesIndexed")
+      .setInputCol(featColName)
+      .setOutputCol(idxdFeatColName)
       .setMaxCategories(10)
       .fit(allData)
 
     val randomForest = new RandomForestClassifier()
-      .setLabelCol("SurvivedIndexed")
-      .setFeaturesCol("FeaturesIndexed")
+      .setLabelCol(idxdLabelColName)
+      .setFeaturesCol(idxdFeatColName)
 
     val labelConverter = new IndexToString()
       .setInputCol("prediction")
@@ -91,15 +95,15 @@ object Titanic {
 
     // grid of values to perform cross validation on
     val paramGrid = new ParamGridBuilder()
-        .addGrid(randomForest.impurity, Array("entropy", "gini"))
-        .addGrid(randomForest.maxBins, Array(10, 15, 20, 25, 30))
-        .addGrid(randomForest.maxDepth, Array(3, 5, 7, 9, 11))
-        .addGrid(randomForest.minInfoGain, Array(0, 0.01, 0.1, 0.5, 1))
-        .build()
+      .addGrid(randomForest.impurity, Array("entropy", "gini"))
+      .addGrid(randomForest.maxBins, Array(10, 15, 20, 25, 30))
+      .addGrid(randomForest.maxDepth, Array(3, 5, 7, 9, 11))
+      .addGrid(randomForest.minInfoGain, Array(0, 0.01, 0.1, 0.5, 1))
+      .build()
 
     val cv = new CrossValidator()
       .setEstimator(pipeline)
-      .setEvaluator(new BinaryClassificationEvaluator().setLabelCol("SurvivedIndexed"))
+      .setEvaluator(new BinaryClassificationEvaluator().setLabelCol(idxdLabelColName))
       .setEstimatorParamMaps(paramGrid)
       .setNumFolds(10)
 
@@ -109,10 +113,10 @@ object Titanic {
     // make predictions
     val predictions = crossValidatorModel.transform(predictDFAssembled)
 
-    predictions.select("predictedLabel", "Features").show(5, false)
+    predictions.select("predictedLabel", featColName).show(5, false)
 
     predictions
-      .withColumn("Survived", col("predictedLabel"))
+      .withColumn(labelColName, col("predictedLabel"))
       .select("PassengerId", "Survived")
       .write
       .format(csvFormat)
