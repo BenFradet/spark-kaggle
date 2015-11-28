@@ -17,7 +17,6 @@ object Titanic {
   def main(args: Array[String]): Unit = {
 
     Logger.getLogger("org").setLevel(Level.WARN)
-    Logger.getLogger("akka").setLevel(Level.WARN)
 
     if (args.length < 3) {
       System.err.println("Usage: Titanic <train file> <predict file> <output file>")
@@ -56,9 +55,12 @@ object Titanic {
       .setOutputCol(featColName)
 
     // transform the dataframe with the previously defined assembler
-    val dataDFAssembled = assembler.transform(dataDFIndexed)
+    val dataDFAssembled = assembler
+      .transform(dataDFIndexed)
+      .filter(!col(labelColName).equalTo(""))
     dataDFAssembled.cache()
-    val predictDFAssembled = assembler.transform(predictDFIndexed)
+    val predictDFAssembled = assembler
+      .transform(predictDFIndexed)
     predictDFAssembled.cache()
 
     val allData = dataDFAssembled.unionAll(predictDFAssembled)
@@ -95,15 +97,17 @@ object Titanic {
 
     // grid of values to perform cross validation on
     val paramGrid = new ParamGridBuilder()
+      .addGrid(randomForest.maxBins, Array(25, 28, 31))
+      .addGrid(randomForest.maxDepth, Array(4, 6, 8))
       .addGrid(randomForest.impurity, Array("entropy", "gini"))
-      .addGrid(randomForest.maxBins, Array(10, 15, 20, 25, 30))
-      .addGrid(randomForest.maxDepth, Array(3, 5, 7, 9, 11))
-      .addGrid(randomForest.minInfoGain, Array(0, 0.01, 0.1, 0.5, 1))
       .build()
+
+    val evaluator = new BinaryClassificationEvaluator()
+      .setLabelCol(idxdLabelColName)
 
     val cv = new CrossValidator()
       .setEstimator(pipeline)
-      .setEvaluator(new BinaryClassificationEvaluator().setLabelCol(idxdLabelColName))
+      .setEvaluator(evaluator)
       .setEstimatorParamMaps(paramGrid)
       .setNumFolds(10)
 
@@ -234,7 +238,7 @@ object Titanic {
     val newTestDF = testDF
       .withColumn("FamilySize", familySizeUDF(col("SibSp"), col("Parch")))
       .withColumn("Title", titleUDF(col("Name"), col("Sex")))
-      .withColumn("SurvivedString", lit("").cast(StringType))
+      .withColumn("SurvivedString", lit("0").cast(StringType))
 
     (newTrainDF, newTestDF)
   }
