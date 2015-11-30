@@ -57,7 +57,6 @@ object Titanic {
     // transform the dataframe with the previously defined assembler
     val dataDFAssembled = assembler
       .transform(dataDFIndexed)
-      .filter(!col(labelColName).equalTo(""))
     dataDFAssembled.cache()
     val predictDFAssembled = assembler
       .transform(predictDFIndexed)
@@ -67,7 +66,6 @@ object Titanic {
     allData.cache()
 
     val idxdLabelColName = "SurvivedIndexed"
-    val idxdFeatColName = "FeaturesIndexed"
 
     // index classes
     val labelIndexer = new StringIndexer()
@@ -75,16 +73,9 @@ object Titanic {
       .setOutputCol(idxdLabelColName)
       .fit(allData)
 
-    // identify categorical features
-    val featuresIndexer = new VectorIndexer()
-      .setInputCol(featColName)
-      .setOutputCol(idxdFeatColName)
-      .setMaxCategories(10)
-      .fit(allData)
-
     val randomForest = new RandomForestClassifier()
       .setLabelCol(idxdLabelColName)
-      .setFeaturesCol(idxdFeatColName)
+      .setFeaturesCol(featColName)
 
     val labelConverter = new IndexToString()
       .setInputCol("prediction")
@@ -93,7 +84,7 @@ object Titanic {
 
     // define the order of the operations to be performed
     val pipeline = new Pipeline()
-      .setStages(Array(labelIndexer, featuresIndexer, randomForest, labelConverter))
+      .setStages(Array(labelIndexer, randomForest, labelConverter))
 
     // grid of values to perform cross validation on
     val paramGrid = new ParamGridBuilder()
@@ -117,7 +108,7 @@ object Titanic {
     // make predictions
     val predictions = crossValidatorModel.transform(predictDFAssembled)
 
-    predictions.select("predictedLabel", featColName).show(5, false)
+    predictions.select("predictedLabel", "rawPrediction", featColName).show(5, false)
 
     predictions
       .withColumn("Survived", col("predictedLabel"))
