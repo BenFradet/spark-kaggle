@@ -133,17 +133,18 @@ object Titanic {
     var oldTestDF = testDF
     var newTestDF = testDF
     categoricalFeatColNames
-      .map(colName => new StringIndexer()
-      .setInputCol(colName)
-      .setOutputCol(colName + "Indexed")
-      .fit(dataFiltered)
-      )
+      .map { colName =>
+        new StringIndexer()
+          .setInputCol(colName)
+          .setOutputCol(colName + "Indexed")
+          .fit(dataFiltered)
+      }
       .foreach { stringIndexer =>
-      newTrainDF = stringIndexer.transform(oldTrainDF)
-      newTestDF = stringIndexer.transform(oldTestDF)
-      oldTrainDF = newTrainDF
-      oldTestDF = newTestDF
-    }
+        newTrainDF = stringIndexer.transform(oldTrainDF)
+        newTestDF = stringIndexer.transform(oldTestDF)
+        oldTrainDF = newTrainDF
+        oldTestDF = newTestDF
+      }
 
     (newTrainDF, newTestDF)
   }
