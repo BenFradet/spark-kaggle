@@ -4,7 +4,7 @@ import org.apache.log4j.{Logger, Level}
 import org.apache.spark.ml.Pipeline
 import org.apache.spark.ml.classification.RandomForestClassifier
 import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
-import org.apache.spark.ml.feature.{IndexToString, VectorAssembler, StringIndexer}
+import org.apache.spark.ml.feature.{StringIndexerModel, IndexToString, VectorAssembler, StringIndexer}
 import org.apache.spark.ml.tuning.{CrossValidator, ParamGridBuilder}
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.{DataFrame, Row, SQLContext}
@@ -48,8 +48,13 @@ object Titanic {
     val dataDFFiltered = dataDFCompleted.select(labelColName, allPredictColNames: _*)
     val predictDFFiltered = predictDFCompleted.select(labelColName, allPredictColNames: _*)
 
-    val (dataDFIndexed, predictDFIndexed) =
-      indexCategoricalFeatures(dataDFFiltered, predictDFFiltered, categoricalFeatColNames)
+    //val (dataDFIndexed, predictDFIndexed) =
+    //  indexCategoricalFeatures(dataDFFiltered, predictDFFiltered, categoricalFeatColNames)
+
+    val allData = dataDFFiltered.unionAll(predictDFFiltered)
+    allData.cache()
+
+    val stringIndexers = categoricalFeatureIndexers(allData, categoricalFeatColNames)
 
     // vector assembler
     val assembler = new VectorAssembler()
@@ -57,15 +62,12 @@ object Titanic {
       .setOutputCol(featColName)
 
     // transform the dataframe with the previously defined assembler
-    val dataDFAssembled = assembler
-      .transform(dataDFIndexed)
-    dataDFAssembled.cache()
-    val predictDFAssembled = assembler
-      .transform(predictDFIndexed)
-    predictDFAssembled.cache()
-
-    val allData = dataDFAssembled.unionAll(predictDFAssembled)
-    allData.cache()
+    //val dataDFAssembled = assembler
+    //  .transform(dataDFIndexed)
+    //dataDFAssembled.cache()
+    //val predictDFAssembled = assembler
+    //  .transform(predictDFIndexed)
+    //predictDFAssembled.cache()
 
     val idxdLabelColName = "SurvivedIndexed"
 
@@ -86,7 +88,10 @@ object Titanic {
 
     // define the order of the operations to be performed
     val pipeline = new Pipeline()
-      .setStages(Array(labelIndexer, randomForest, labelConverter))
+      .setStages(Array.concat(
+        Array(labelIndexer),
+        stringIndexers.toArray,
+        Array(assembler, randomForest, labelConverter)))
 
     // grid of values to perform cross validation on
     val paramGrid = new ParamGridBuilder()
@@ -105,10 +110,10 @@ object Titanic {
       .setNumFolds(10)
 
     // train the model
-    val crossValidatorModel = cv.fit(dataDFAssembled)
+    val crossValidatorModel = cv.fit(dataDFFiltered)
 
     // make predictions
-    val predictions = crossValidatorModel.transform(predictDFAssembled)
+    val predictions = crossValidatorModel.transform(predictDFFiltered)
 
     predictions.select("predictedLabel", "rawPrediction", featColName).show(5, false)
 
@@ -119,6 +124,18 @@ object Titanic {
       .format(csvFormat)
       .option("header", "true")
       .save(args(2))
+  }
+
+  def categoricalFeatureIndexers(
+    data: DataFrame,
+    categoricalFeatColNames: Seq[String]
+  ): Seq[StringIndexerModel] = {
+    categoricalFeatColNames.map { colName =>
+      new StringIndexer()
+        .setInputCol(colName)
+        .setOutputCol(colName + "Indexed")
+        .fit(data)
+    }
   }
 
   def indexCategoricalFeatures(
