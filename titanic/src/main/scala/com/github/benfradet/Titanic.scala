@@ -81,11 +81,10 @@ object Titanic {
       .setLabels(labelIndexer.labels)
 
     // define the order of the operations to be performed
-    val pipeline = new Pipeline()
-      .setStages(Array.concat(
-        stringIndexers.toArray,
-        Array(labelIndexer),
-        Array(assembler, randomForest, labelConverter)))
+    val pipeline = new Pipeline().setStages(Array.concat(
+      stringIndexers.toArray,
+      Array(labelIndexer, assembler, randomForest, labelConverter)
+    ))
 
     // grid of values to perform cross validation on
     val paramGrid = new ParamGridBuilder()
