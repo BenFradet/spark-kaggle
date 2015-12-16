@@ -1,5 +1,6 @@
 #!/bin/bash
 
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 OUTPUT="classified.csv"
 TMP_FILE="${OUTPUT}2"
 NB_THREADS=2
@@ -7,6 +8,7 @@ NB_THREADS=2
 rm -rf ${OUTPUT}
 rm -rf ${TMP_FILE}
 
+cd ${DIR}
 mvn clean package
 spark-submit \
   --class com.github.benfradet.Titanic \
@@ -26,4 +28,3 @@ done
 
 rm -rf ${OUTPUT}
 mv ${TMP_FILE} ${OUTPUT}
-
