@@ -3,7 +3,6 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 OUTPUT="classified.csv"
 TMP_FILE="${OUTPUT}2"
-NB_THREADS=2
 
 rm -rf ${OUTPUT}
 rm -rf ${TMP_FILE}
@@ -12,17 +11,16 @@ cd ${DIR}
 mvn clean package
 spark-submit \
   --class com.github.benfradet.Titanic \
-  --master local[${NB_THREADS}] \
+  --master local[2] \
   target/titanic-1.0-SNAPSHOT.jar \
   src/main/resources/train.csv src/main/resources/test.csv ${OUTPUT}
 
 touch ${TMP_FILE}
-for (( i=0; i<${NB_THREADS}; i++ )); do
-    PART_FILE="${OUTPUT}/part-0000${i}"
-    if [ ${i} == 0 ]; then
-        cat ${PART_FILE} >> ${TMP_FILE}
+for line in $(find ${OUTPUT} -name 'part-*'); do
+    if [ "${line}" == "${OUTPUT}/part-00000" ]; then
+        cat ${line} >> ${TMP_FILE}
     else
-        tail -n +2 ${PART_FILE} >> ${TMP_FILE}
+        tail -n +2 ${line} >> ${TMP_FILE}
     fi
 done
 

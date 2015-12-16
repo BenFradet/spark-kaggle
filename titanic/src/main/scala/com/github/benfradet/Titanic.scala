@@ -108,8 +108,6 @@ object Titanic {
     // make predictions
     val predictions = crossValidatorModel.transform(predictDFFiltered)
 
-    predictions.select("predictedLabel", "rawPrediction", featColName).show(5, false)
-
     predictions
       .withColumn("Survived", col("predictedLabel"))
       .select("PassengerId", "Survived")
