@@ -51,12 +51,12 @@ object Titanic {
     val allData = dataDFFiltered.unionAll(predictDFFiltered)
     allData.cache()
 
-    val stringIndexers = categoricalFeatureIndexers(allData, categoricalFeatColNames)
-
-    // vector assembler
-    val assembler = new VectorAssembler()
-      .setInputCols(Array(allIdxdFeatColNames: _*))
-      .setOutputCol(featColName)
+    val stringIndexers = categoricalFeatColNames.map { colName =>
+      new StringIndexer()
+        .setInputCol(colName)
+        .setOutputCol(colName + "Indexed")
+        .fit(allData)
+    }
 
     val idxdLabelColName = "SurvivedIndexed"
 
@@ -65,6 +65,11 @@ object Titanic {
       .setInputCol(labelColName)
       .setOutputCol(idxdLabelColName)
       .fit(allData)
+
+    // vector assembler
+    val assembler = new VectorAssembler()
+      .setInputCols(Array(allIdxdFeatColNames: _*))
+      .setOutputCol(featColName)
 
     val randomForest = new RandomForestClassifier()
       .setLabelCol(idxdLabelColName)
@@ -113,46 +118,6 @@ object Titanic {
       .format(csvFormat)
       .option("header", "true")
       .save(args(2))
-  }
-
-  def categoricalFeatureIndexers(
-    data: DataFrame,
-    categoricalFeatColNames: Seq[String]
-  ): Seq[StringIndexerModel] = {
-    categoricalFeatColNames.map { colName =>
-      new StringIndexer()
-        .setInputCol(colName)
-        .setOutputCol(colName + "Indexed")
-        .fit(data)
-    }
-  }
-
-  def indexCategoricalFeatures(
-    trainDF: DataFrame,
-    testDF: DataFrame,
-    categoricalFeatColNames: Seq[String]
-  ): (DataFrame, DataFrame) = {
-    val dataFiltered = trainDF.unionAll(testDF)
-
-    var oldTrainDF = trainDF
-    var newTrainDF = trainDF
-    var oldTestDF = testDF
-    var newTestDF = testDF
-    categoricalFeatColNames
-      .map { colName =>
-        new StringIndexer()
-          .setInputCol(colName)
-          .setOutputCol(colName + "Indexed")
-          .fit(dataFiltered)
-      }
-      .foreach { stringIndexer =>
-        newTrainDF = stringIndexer.transform(oldTrainDF)
-        newTestDF = stringIndexer.transform(oldTestDF)
-        oldTrainDF = newTrainDF
-        oldTestDF = newTestDF
-      }
-
-    (newTrainDF, newTestDF)
   }
 
   def fillNAValues(trainDF: DataFrame, testDF: DataFrame): (DataFrame, DataFrame) = {
