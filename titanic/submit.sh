@@ -1,6 +1,6 @@
 #!/bin/bash
 
-OUTPUT="src/main/resources/classified.csv"
+OUTPUT="classified.csv"
 TMP_FILE="${OUTPUT}2"
 NB_THREADS=2
 
