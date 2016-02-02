@@ -15,14 +15,6 @@ spark-submit \
   target/titanic-1.0-SNAPSHOT.jar \
   src/main/resources/train.csv src/main/resources/test.csv ${OUTPUT}
 
-touch ${TMP_FILE}
-for line in $(find ${OUTPUT} -name 'part-*'); do
-    if [ "${line}" == "${OUTPUT}/part-00000" ]; then
-        cat ${line} >> ${TMP_FILE}
-    else
-        tail -n +2 ${line} >> ${TMP_FILE}
-    fi
-done
-
+mv ${OUTPUT}/part-00000 ${TMP_FILE}
 rm -rf ${OUTPUT}
 mv ${TMP_FILE} ${OUTPUT}
