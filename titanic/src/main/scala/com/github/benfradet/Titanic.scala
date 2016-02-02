@@ -111,6 +111,7 @@ object Titanic {
     predictions
       .withColumn("Survived", col("predictedLabel"))
       .select("PassengerId", "Survived")
+      .coalesce(1)
       .write
       .format(csvFormat)
       .option("header", "true")
