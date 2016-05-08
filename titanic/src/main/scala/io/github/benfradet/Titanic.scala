@@ -1,4 +1,4 @@
-package com.github.benfradet
+package io.github.benfradet
 
 import org.apache.log4j.{Logger, Level}
 import org.apache.spark.ml.Pipeline
