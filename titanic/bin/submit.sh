@@ -4,10 +4,10 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 OUTPUT="classified.csv"
 TMP_FILE="${OUTPUT}2"
 
+cd ${DIR}
 rm -rf ${OUTPUT}
 rm -rf ${TMP_FILE}
 
-cd ${DIR}
 mvn clean package
 spark-submit \
   --class com.github.benfradet.Titanic \
