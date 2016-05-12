@@ -8,7 +8,8 @@ lazy val buildSettings = Seq(
     "org.apache.spark" %% "spark-core",
     "org.apache.spark" %% "spark-mllib",
     "org.apache.spark" %% "spark-sql"
-  ).map(_ % sparkVersion % "provided")
+  ).map(_ % sparkVersion % "provided") :+
+    "com.databricks" %% "spark-csv" % "1.4.0"
 )
 
 lazy val compilerOptions = Seq(
@@ -27,13 +28,14 @@ lazy val compilerOptions = Seq(
 )
 
 lazy val kaggle = project.in(file("."))
-  .settings(moduleName := "kaggle")
+  .settings(moduleName := "spark-kaggle")
   .settings(buildSettings)
-  .aggregate(titanic)
+  .aggregate(titanic, sfCrime)
 
 lazy val titanic = project
   .settings(moduleName := "titanic")
   .settings(buildSettings)
-  .settings(
-    libraryDependencies += "com.databricks" %% "spark-csv" % "1.4.0"
-  )
+
+lazy val sfCrime = project
+  .settings(moduleName := "sfCrime")
+  .settings(buildSettings)

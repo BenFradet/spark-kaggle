@@ -16,11 +16,10 @@ object Titanic {
   val csvFormat = "com.databricks.spark.csv"
 
   def main(args: Array[String]): Unit = {
-
     Logger.getLogger("org").setLevel(Level.WARN)
 
     if (args.length < 3) {
-      System.err.println("Usage: Titanic <train file> <predict file> <output file>")
+      System.err.println("Usage: Titanic <train file> <test file> <output file>")
       System.exit(1)
     }
 
