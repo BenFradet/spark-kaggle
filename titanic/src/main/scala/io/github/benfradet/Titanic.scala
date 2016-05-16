@@ -123,17 +123,17 @@ object Titanic {
     val avgAge = trainDF.select("Age").unionAll(testDF.select("Age"))
       .agg(avg("Age"))
       .collect() match {
-      case Array(Row(avg: Double)) => avg
-      case _ => 0
-    }
+        case Array(Row(avg: Double)) => avg
+        case _ => 0
+      }
 
     // fill empty values for the fare column
     val avgFare = trainDF.select("Fare").unionAll(testDF.select("Fare"))
       .agg(avg("Fare"))
       .collect() match {
-      case Array(Row(avg: Double)) => avg
-      case _ => 0
-    }
+        case Array(Row(avg: Double)) => avg
+        case _ => 0
+      }
 
     // map to fill na values
     val fillNAMap = Map(
