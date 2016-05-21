@@ -4,6 +4,7 @@ import org.apache.log4j.{Logger, Level}
 import org.apache.spark.ml.Pipeline
 import org.apache.spark.ml.classification.RandomForestClassifier
 import org.apache.spark.ml.feature.{IndexToString, VectorAssembler, StringIndexer}
+import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{Row, DataFrame, SQLContext}
 import org.apache.spark.{SparkConf, SparkContext}
@@ -23,37 +24,43 @@ object SFCrime {
     val sc = new SparkContext(new SparkConf().setAppName("Titanic"))
     val sqlContext = new SQLContext(sc)
 
-    val (dataDFRaw, predictDFRaw) = loadData(args(0), args(1), sqlContext)
+    val (rawTrainDF, rawTestDF) = loadData(args(0), args(1), sqlContext)
 
     // extra features:
-    // - weekend
     // - day/night
     // - weather:
     //   min date: 2003-01-01 00:01:00.0, max date: 2015-05-13 23:53:00.0
-    // - hour of day:
-    //   Dates
     // - street:
     //   remove the number from the Address
-    //   val distinctAddresses = dataDFRaw.select("Address").distinct()
+    //   val distinctAddresses = rawTrainDF.select("Address").distinct()
     //   distinctAddresses.show(truncate = false)
     //   println(distinctAddresses.count())
+    val (enrichedTrainDF, enrichedTestDF) = enrichData(rawTrainDF, rawTestDF)
 
     val labelColName = "Category"
     val predictedLabelColName = "predictedLabel"
     val featuresColName = "Features"
     val numericFeatColNames = Seq("X", "Y")
-    val categoricalFeatColNames = Seq("DayOfWeek", "PdDistrict")
+    val categoricalFeatColNames = Seq("DayOfWeek", "PdDistrict",
+      "Weekend", "HourOfDay", "Month", "Year")
+
+    val allData = enrichedTrainDF
+      .select((numericFeatColNames ++ categoricalFeatColNames).map(col): _*)
+      .unionAll(enrichedTestDF
+        .select((numericFeatColNames ++ categoricalFeatColNames).map(col): _*))
+    allData.cache()
 
     val stringIndexers = categoricalFeatColNames.map { colName =>
       new StringIndexer()
         .setInputCol(colName)
         .setOutputCol(colName + "Indexed")
+        .fit(allData)
     }
 
     val labelIndexer = new StringIndexer()
       .setInputCol(labelColName)
       .setOutputCol(labelColName + "Indexed")
-      .fit(dataDFRaw)
+      .fit(enrichedTrainDF)
 
     val assembler = new VectorAssembler()
       .setInputCols((categoricalFeatColNames.map(_ + "Indexed") ++ numericFeatColNames).toArray)
@@ -62,13 +69,13 @@ object SFCrime {
     val randomForest = new RandomForestClassifier()
       .setLabelCol(labelColName + "Indexed")
       .setFeaturesCol(featuresColName)
-      .setImpurity("entropy")
-      .setMaxBins(39)
       .setMaxDepth(10)
+      .setMaxBins(24777)
+      .setImpurity("entropy")
 
     val indexToString = new IndexToString()
       .setInputCol("prediction")
-        .setOutputCol(predictedLabelColName)
+      .setOutputCol(predictedLabelColName)
       .setLabels(labelIndexer.labels)
 
     val pipeline = new Pipeline()
@@ -77,7 +84,9 @@ object SFCrime {
         Array(labelIndexer, assembler, randomForest, indexToString)
       ))
 
-    val labels = dataDFRaw.select(labelColName).distinct().collect()
+    val pipelineModel = pipeline.fit(enrichedTrainDF)
+
+    val labels = enrichedTrainDF.select(labelColName).distinct().collect()
       .map { case Row(label: String) => label }
       .sorted
 
@@ -87,9 +96,8 @@ object SFCrime {
       array.toSeq
     }
 
-    val predictions = pipeline
-      .fit(dataDFRaw)
-      .transform(predictDFRaw)
+    val predictions = pipelineModel
+      .transform(enrichedTestDF)
       .select("Id", predictedLabelColName)
 
     val schema = StructType(predictions.schema.fields ++ labels.map(StructField(_, IntegerType)))
@@ -105,6 +113,26 @@ object SFCrime {
       .format(csvFormat)
       .option("header", "true")
       .save(args(2))
+  }
+
+  def enrichData(trainDF: DataFrame, predictDF: DataFrame): (DataFrame, DataFrame) = {
+    def weekendUDF = udf((dayOfWeek: String) => dayOfWeek match {
+      case _ @ ("Saturday" | "Sunday") => 1
+      case _ => 0
+    })
+
+    (
+      trainDF
+        .withColumn("Weekend", weekendUDF(col("DayOfWeek")))
+        .withColumn("HourOfDay", hour(col("Dates")))
+        .withColumn("Month", month(col("Dates")))
+        .withColumn("Year", year(col("Dates"))),
+      predictDF
+        .withColumn("Weekend", weekendUDF(col("DayOfWeek")))
+        .withColumn("HourOfDay", hour(col("Dates")))
+        .withColumn("Month", month(col("Dates")))
+        .withColumn("Year", year(col("Dates")))
+      )
   }
 
   def loadData(
