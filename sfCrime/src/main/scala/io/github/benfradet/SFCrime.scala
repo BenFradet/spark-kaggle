@@ -32,9 +32,10 @@ object SFCrime {
     //   min date: 2003-01-01 00:01:00.0, max date: 2015-05-13 23:53:00.0
     // - street:
     //   remove the number from the Address
-    //   val distinctAddresses = rawTrainDF.select("Address").distinct()
-    //   distinctAddresses.show(truncate = false)
-    //   println(distinctAddresses.count())
+    //val distinctAddresses = rawTrainDF.select("Address").distinct()
+    //distinctAddresses.show(200, truncate = false)
+    //println(distinctAddresses.count())
+
     val (enrichedTrainDF, enrichedTestDF) = enrichData(rawTrainDF, rawTestDF)
 
     val labelColName = "Category"
@@ -42,19 +43,12 @@ object SFCrime {
     val featuresColName = "Features"
     val numericFeatColNames = Seq("X", "Y")
     val categoricalFeatColNames = Seq("DayOfWeek", "PdDistrict",
-      "Weekend", "HourOfDay", "Month", "Year")
-
-    val allData = enrichedTrainDF
-      .select((numericFeatColNames ++ categoricalFeatColNames).map(col): _*)
-      .unionAll(enrichedTestDF
-        .select((numericFeatColNames ++ categoricalFeatColNames).map(col): _*))
-    allData.cache()
+      "Weekend", "HourOfDay", "Month", "Year", "AddressType")
 
     val stringIndexers = categoricalFeatColNames.map { colName =>
       new StringIndexer()
         .setInputCol(colName)
         .setOutputCol(colName + "Indexed")
-        .fit(allData)
     }
 
     val labelIndexer = new StringIndexer()
@@ -70,7 +64,7 @@ object SFCrime {
       .setLabelCol(labelColName + "Indexed")
       .setFeaturesCol(featuresColName)
       .setMaxDepth(10)
-      .setMaxBins(24777)
+      .setMaxBins(39)
       .setImpurity("entropy")
 
     val indexToString = new IndexToString()
@@ -116,6 +110,11 @@ object SFCrime {
   }
 
   def enrichData(trainDF: DataFrame, predictDF: DataFrame): (DataFrame, DataFrame) = {
+    def addressTypeUDF = udf { (address: String) =>
+      if (address contains "/") "Intersection"
+      else "Street"
+    }
+
     def weekendUDF = udf((dayOfWeek: String) => dayOfWeek match {
       case _ @ ("Saturday" | "Sunday") => 1
       case _ => 0
@@ -123,11 +122,13 @@ object SFCrime {
 
     (
       trainDF
+        .withColumn("AddressType", addressTypeUDF(col("Address")))
         .withColumn("Weekend", weekendUDF(col("DayOfWeek")))
         .withColumn("HourOfDay", hour(col("Dates")))
         .withColumn("Month", month(col("Dates")))
         .withColumn("Year", year(col("Dates"))),
       predictDF
+        .withColumn("AddressType", addressTypeUDF(col("Address")))
         .withColumn("Weekend", weekendUDF(col("DayOfWeek")))
         .withColumn("HourOfDay", hour(col("Dates")))
         .withColumn("Month", month(col("Dates")))

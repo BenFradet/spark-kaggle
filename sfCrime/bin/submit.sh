@@ -22,8 +22,6 @@ unzip ${TEST_PATH} -d ${RESOURCES_PATH}
 spark-submit \
   --class io.github.benfradet.SFCrime \
   --master local[2] \
-  --driver-memory 2G \
-  --executor-memory 4G \
   target/scala-2.11/sfCrime-assembly-1.0.jar \
   ${TRAIN_PATH} ${TEST_PATH} ${OUTPUT}
 
