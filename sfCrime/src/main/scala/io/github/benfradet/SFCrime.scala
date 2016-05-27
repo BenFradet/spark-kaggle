@@ -116,7 +116,7 @@ object SFCrime {
     }
 
     def weekendUDF = udf((dayOfWeek: String) => dayOfWeek match {
-      case _ @ ("Saturday" | "Sunday") => 1
+      case _ @ ("Friday" | "Saturday" | "Sunday") => 1
       case _ => 0
     })
 
