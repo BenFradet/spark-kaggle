@@ -30,11 +30,6 @@ object SFCrime {
     // - day/night
     // - weather:
     //   min date: 2003-01-01 00:01:00.0, max date: 2015-05-13 23:53:00.0
-    // - street:
-    //   remove the number from the Address
-    //val distinctAddresses = rawTrainDF.select("Address").distinct()
-    //distinctAddresses.show(200, truncate = false)
-    //println(distinctAddresses.count())
 
     val (enrichedTrainDF, enrichedTestDF) = enrichData(rawTrainDF, rawTestDF)
 
@@ -43,12 +38,19 @@ object SFCrime {
     val featuresColName = "Features"
     val numericFeatColNames = Seq("X", "Y")
     val categoricalFeatColNames = Seq("DayOfWeek", "PdDistrict",
-      "Weekend", "HourOfDay", "Month", "Year", "AddressType")
+      "Weekend", "HourOfDay", "Month", "Year", "AddressType", "AddressParsed")
+
+    val allData = enrichedTrainDF
+      .select((numericFeatColNames ++ categoricalFeatColNames).map(col): _*)
+      .unionAll(enrichedTestDF
+        .select((numericFeatColNames ++ categoricalFeatColNames).map(col): _*))
+    allData.cache()
 
     val stringIndexers = categoricalFeatColNames.map { colName =>
       new StringIndexer()
         .setInputCol(colName)
         .setOutputCol(colName + "Indexed")
+        .fit(allData)
     }
 
     val labelIndexer = new StringIndexer()
@@ -64,7 +66,7 @@ object SFCrime {
       .setLabelCol(labelColName + "Indexed")
       .setFeaturesCol(featuresColName)
       .setMaxDepth(10)
-      .setMaxBins(39)
+      .setMaxBins(2089)
       .setImpurity("entropy")
 
     val indexToString = new IndexToString()
@@ -115,20 +117,36 @@ object SFCrime {
       else "Street"
     }
 
-    def weekendUDF = udf((dayOfWeek: String) => dayOfWeek match {
-      case _ @ ("Friday" | "Saturday" | "Sunday") => 1
-      case _ => 0
-    })
+    val streetRegex = """\d{1,4} Block of (.+)""".r
+    val intersectionRegex = """(.+) / (.+)""".r
+    def addressUDF = udf { (address: String) =>
+      streetRegex findFirstIn address match {
+        case Some(streetRegex(s)) => s
+        case None => intersectionRegex findFirstIn address match {
+          case Some(intersectionRegex(s1, s2)) => if (s1 < s2) s1 else s2
+          case None => address
+        }
+      }
+    }
+
+    def weekendUDF = udf { (dayOfWeek: String) =>
+      dayOfWeek match {
+        case _ @ ("Friday" | "Saturday" | "Sunday") => 1
+        case _ => 0
+      }
+    }
 
     (
       trainDF
         .withColumn("AddressType", addressTypeUDF(col("Address")))
+        .withColumn("AddressParsed", addressUDF(col("Address")))
         .withColumn("Weekend", weekendUDF(col("DayOfWeek")))
         .withColumn("HourOfDay", hour(col("Dates")))
         .withColumn("Month", month(col("Dates")))
         .withColumn("Year", year(col("Dates"))),
       predictDF
         .withColumn("AddressType", addressTypeUDF(col("Address")))
+        .withColumn("AddressParsed", addressUDF(col("Address")))
         .withColumn("Weekend", weekendUDF(col("DayOfWeek")))
         .withColumn("HourOfDay", hour(col("Dates")))
         .withColumn("Month", month(col("Dates")))
