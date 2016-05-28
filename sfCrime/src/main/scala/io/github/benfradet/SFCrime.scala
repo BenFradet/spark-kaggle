@@ -2,7 +2,7 @@ package io.github.benfradet
 
 import org.apache.log4j.{Logger, Level}
 import org.apache.spark.ml.Pipeline
-import org.apache.spark.ml.classification.RandomForestClassifier
+import org.apache.spark.ml.classification.{RandomForestClassificationModel, RandomForestClassifier}
 import org.apache.spark.ml.feature.{IndexToString, VectorAssembler, StringIndexer}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
@@ -81,6 +81,12 @@ object SFCrime {
       ))
 
     val pipelineModel = pipeline.fit(enrichedTrainDF)
+
+    val featureImportances =
+      pipelineModel.stages(10).asInstanceOf[RandomForestClassificationModel].featureImportances
+    assembler.getInputCols
+      .zip(featureImportances.toArray)
+      .foreach { case (feat, imp) => println(s"feature: $feat, importance: $imp") }
 
     val labels = enrichedTrainDF.select(labelColName).distinct().collect()
       .map { case Row(label: String) => label }
