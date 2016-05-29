@@ -1,4 +1,5 @@
 lazy val sparkVersion = "1.6.1"
+lazy val circeVersion = "0.4.1"
 
 lazy val buildSettings = Seq(
   organization := "io.github.benfradet",
@@ -39,3 +40,10 @@ lazy val titanic = project
 lazy val sfCrime = project
   .settings(moduleName := "sfCrime")
   .settings(buildSettings)
+  .settings(libraryDependencies ++= Seq(
+    "io.circe" %% "circe-core",
+    "io.circe" %% "circe-generic",
+    "io.circe" %% "circe-parser"
+  ).map(_ % circeVersion) :+
+    "com.twitter" %% "util-core" % "6.34.0"
+  )
