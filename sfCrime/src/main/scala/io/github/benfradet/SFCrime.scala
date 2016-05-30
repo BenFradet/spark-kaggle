@@ -1,5 +1,8 @@
 package io.github.benfradet
 
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+
 import org.apache.log4j.{Logger, Level}
 import org.apache.spark.ml.Pipeline
 import org.apache.spark.ml.classification.{RandomForestClassificationModel, RandomForestClassifier}
@@ -31,17 +34,16 @@ object SFCrime {
     val sunsetDF = sqlContext.read.json(sunsetRDD)
 
     // extra features:
-    // - day/night
     // - weather:
     //   min date: 2003-01-01 00:01:00.0, max date: 2015-05-13 23:53:00.0
 
-    val (enrichedTrainDF, enrichedTestDF) = enrichData(rawTrainDF, rawTestDF)
+    val (enrichedTrainDF, enrichedTestDF) = enrichData(rawTrainDF, rawTestDF, sunsetDF)
 
     val labelColName = "Category"
     val predictedLabelColName = "predictedLabel"
     val featuresColName = "Features"
     val numericFeatColNames = Seq("X", "Y")
-    val categoricalFeatColNames = Seq("DayOfWeek", "PdDistrict",
+    val categoricalFeatColNames = Seq("DayOfWeek", "PdDistrict", "DayOrNight",
       "Weekend", "HourOfDay", "Month", "Year", "AddressType", "AddressParsed")
 
     val allData = enrichedTrainDF
@@ -121,7 +123,11 @@ object SFCrime {
       .save(outputFile)
   }
 
-  def enrichData(trainDF: DataFrame, predictDF: DataFrame): (DataFrame, DataFrame) = {
+  def enrichData(
+    trainDF: DataFrame,
+    predictDF: DataFrame,
+    sunsetDF: DataFrame
+  ): (DataFrame, DataFrame) = {
     def addressTypeUDF = udf { (address: String) =>
       if (address contains "/") "Intersection"
       else "Street"
@@ -146,10 +152,27 @@ object SFCrime {
       }
     }
 
+    val timestampFormatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME
+    val timeFormatter = DateTimeFormatter.ofPattern("hh:mm:ss a")
+    def dayOrNigthUDF = udf { (timestampUTC: String, sunrise: String, sunset: String) =>
+      val time = LocalTime.parse(timestampUTC, timestampFormatter)
+      val sunriseTime = LocalTime.parse(sunrise, timeFormatter)
+      val sunsetTime = LocalTime.parse(sunset, timeFormatter)
+      if (time.compareTo(sunriseTime) > 0 && time.compareTo(sunsetTime) < 0) {
+        "Day"
+      } else {
+        "Night"
+      }
+    }
+
     (
       trainDF
         .withColumn("AddressType", addressTypeUDF(col("Address")))
         .withColumn("AddressParsed", addressUDF(col("Address")))
+        .withColumn("TimestampUTC", to_utc_timestamp(col("Dates"), "-08:00"))
+        .withColumn("Date", date_format(to_date(col("TimestampUTC")), "YYYY-MM-dd"))
+        .join(sunsetDF, trainDF("Date") === sunsetDF("date"))
+        .withColumn("DayOrNight", dayOrNigthUDF(col("TimeStampUTC"), col("sunrise"), col("sunset")))
         .withColumn("Weekend", weekendUDF(col("DayOfWeek")))
         .withColumn("HourOfDay", hour(col("Dates")))
         .withColumn("Month", month(col("Dates")))
@@ -157,6 +180,10 @@ object SFCrime {
       predictDF
         .withColumn("AddressType", addressTypeUDF(col("Address")))
         .withColumn("AddressParsed", addressUDF(col("Address")))
+        .withColumn("TimestampUTC", to_utc_timestamp(col("Dates"), "-08:00"))
+        .withColumn("Date", date_format(to_date(col("TimestampUTC")), "YYYY-MM-dd"))
+        .join(sunsetDF, trainDF("Date") === sunsetDF("date"))
+        .withColumn("DayOrNight", dayOrNigthUDF(col("TimeStampUTC"), col("sunrise"), col("sunset")))
         .withColumn("Weekend", weekendUDF(col("DayOfWeek")))
         .withColumn("HourOfDay", hour(col("Dates")))
         .withColumn("Month", month(col("Dates")))
