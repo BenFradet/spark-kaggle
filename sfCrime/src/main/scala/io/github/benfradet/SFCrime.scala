@@ -16,15 +16,19 @@ object SFCrime {
   def main(args: Array[String]): Unit = {
     Logger.getLogger("org").setLevel(Level.WARN)
 
-    if (args.length < 3) {
-      System.err.println("Usage: SFCrime <train file> <test file> <output file>")
+    if (args.length < 4) {
+      System.err
+        .println("Usage: SFCrime <train file> <test file> <sunrise/sunset file> <output file>")
       System.exit(1)
     }
+    val Array(trainFile, testFile, sunsetFile, outputFile) = args
 
     val sc = new SparkContext(new SparkConf().setAppName("Titanic"))
     val sqlContext = new SQLContext(sc)
 
-    val (rawTrainDF, rawTestDF) = loadData(args(0), args(1), sqlContext)
+    val (rawTrainDF, rawTestDF) = loadData(trainFile, testFile, sqlContext)
+    val sunsetRDD = sc.wholeTextFiles(sunsetFile).map(_._2)
+    val sunsetDF = sqlContext.read.json(sunsetRDD)
 
     // extra features:
     // - day/night
@@ -114,7 +118,7 @@ object SFCrime {
       .write
       .format(csvFormat)
       .option("header", "true")
-      .save(args(2))
+      .save(outputFile)
   }
 
   def enrichData(trainDF: DataFrame, predictDF: DataFrame): (DataFrame, DataFrame) = {
