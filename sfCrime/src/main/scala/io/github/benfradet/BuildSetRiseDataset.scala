@@ -81,5 +81,5 @@ object BuildSetRiseDataset {
   }
 
   def daysBetween(fromDate: LocalDate, toDate: LocalDate): Seq[LocalDate] =
-    fromDate.toEpochDay.until(toDate.toEpochDay).map(LocalDate.ofEpochDay)
+    fromDate.toEpochDay.to(toDate.toEpochDay).map(LocalDate.ofEpochDay)
 }
