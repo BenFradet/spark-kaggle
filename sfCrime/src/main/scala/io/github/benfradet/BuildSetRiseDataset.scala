@@ -38,7 +38,7 @@ object BuildSetRiseDataset {
 
   def main(args: Array[String]): Unit = {
     val sfLat = 37.7749d
-    val sfLng = 122.4194d
+    val sfLng = -122.4194d
 
     val minDate = LocalDate.of(2003, 1, 1)
     val maxDate = LocalDate.of(2015, 5, 13)
