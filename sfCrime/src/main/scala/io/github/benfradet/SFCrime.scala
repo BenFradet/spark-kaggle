@@ -30,8 +30,10 @@ object SFCrime {
     val sqlContext = new SQLContext(sc)
 
     val (rawTrainDF, rawTestDF) = loadData(trainFile, testFile, sqlContext)
-    val sunsetRDD = sc.wholeTextFiles(sunsetFile).map(_._2)
-    val sunsetDF = sqlContext.read.json(sunsetRDD)
+    val sunsetDF = {
+      val rdd = sc.wholeTextFiles(sunsetFile).map(_._2)
+      sqlContext.read.json(rdd)
+    }
 
     // extra features:
     // - weather:
@@ -71,7 +73,7 @@ object SFCrime {
     val randomForest = new RandomForestClassifier()
       .setLabelCol(labelColName + "Indexed")
       .setFeaturesCol(featuresColName)
-      .setMaxDepth(10)
+      .setMaxDepth(11)
       .setMaxBins(2089)
       .setImpurity("entropy")
 
@@ -88,8 +90,8 @@ object SFCrime {
 
     val pipelineModel = pipeline.fit(enrichedTrainDF)
 
-    val featureImportances =
-      pipelineModel.stages(10).asInstanceOf[RandomForestClassificationModel].featureImportances
+    val featureImportances = pipelineModel.stages(categoricalFeatColNames.size + 2)
+      .asInstanceOf[RandomForestClassificationModel].featureImportances
     assembler.getInputCols
       .zip(featureImportances.toArray)
       .foreach { case (feat, imp) => println(s"feature: $feat, importance: $imp") }
@@ -152,43 +154,46 @@ object SFCrime {
       }
     }
 
-    val timestampFormatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME
-    val timeFormatter = DateTimeFormatter.ofPattern("hh:mm:ss a")
     def dayOrNigthUDF = udf { (timestampUTC: String, sunrise: String, sunset: String) =>
+      val timestampFormatter = DateTimeFormatter.ofPattern("YYYY-MM-dd HH:mm:ss")
+      val timeFormatter = DateTimeFormatter.ofPattern("h:mm:ss a")
       val time = LocalTime.parse(timestampUTC, timestampFormatter)
       val sunriseTime = LocalTime.parse(sunrise, timeFormatter)
       val sunsetTime = LocalTime.parse(sunset, timeFormatter)
-      if (time.compareTo(sunriseTime) > 0 && time.compareTo(sunsetTime) < 0) {
-        "Day"
+      if (sunriseTime.compareTo(sunsetTime) > 0) {
+        if (time.compareTo(sunsetTime) > 0 && time.compareTo(sunriseTime) < 0) {
+          "Night"
+        } else {
+          "Day"
+        }
       } else {
-        "Night"
+        if (time.compareTo(sunriseTime) > 0 && time.compareTo(sunsetTime) < 0) {
+          "Day"
+        } else {
+          "Night"
+        }
       }
     }
 
-    (
-      trainDF
+    val Seq(newTrainDF, newPredictDF) = Seq(trainDF, predictDF).map { df =>
+      val dfWithDate = df
+        .withColumn("TimestampUTC", to_utc_timestamp(col("Dates"), "PST"))
+        .withColumn("Date", date_format(to_date(col("Dates")), "YYYY-MM-dd"))
+
+      val dfJoined = dfWithDate
+        .join(sunsetDF, dfWithDate("Date") === sunsetDF("date"))
+        .withColumn("DayOrNight", dayOrNigthUDF(col("TimestampUTC"), col("sunrise"), col("sunset")))
+
+      dfJoined
         .withColumn("AddressType", addressTypeUDF(col("Address")))
         .withColumn("AddressParsed", addressUDF(col("Address")))
-        .withColumn("TimestampUTC", to_utc_timestamp(col("Dates"), "-08:00"))
-        .withColumn("Date", date_format(to_date(col("TimestampUTC")), "YYYY-MM-dd"))
-        .join(sunsetDF, trainDF("Date") === sunsetDF("date"))
-        .withColumn("DayOrNight", dayOrNigthUDF(col("TimeStampUTC"), col("sunrise"), col("sunset")))
-        .withColumn("Weekend", weekendUDF(col("DayOfWeek")))
-        .withColumn("HourOfDay", hour(col("Dates")))
-        .withColumn("Month", month(col("Dates")))
-        .withColumn("Year", year(col("Dates"))),
-      predictDF
-        .withColumn("AddressType", addressTypeUDF(col("Address")))
-        .withColumn("AddressParsed", addressUDF(col("Address")))
-        .withColumn("TimestampUTC", to_utc_timestamp(col("Dates"), "-08:00"))
-        .withColumn("Date", date_format(to_date(col("TimestampUTC")), "YYYY-MM-dd"))
-        .join(sunsetDF, trainDF("Date") === sunsetDF("date"))
-        .withColumn("DayOrNight", dayOrNigthUDF(col("TimeStampUTC"), col("sunrise"), col("sunset")))
         .withColumn("Weekend", weekendUDF(col("DayOfWeek")))
         .withColumn("HourOfDay", hour(col("Dates")))
         .withColumn("Month", month(col("Dates")))
         .withColumn("Year", year(col("Dates")))
-      )
+    }
+
+    (newTrainDF, newPredictDF)
   }
 
   def loadData(
