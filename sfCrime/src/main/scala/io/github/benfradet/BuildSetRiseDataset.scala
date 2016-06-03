@@ -41,7 +41,7 @@ object BuildSetRiseDataset {
     val sfLng = -122.4194d
 
     val minDate = LocalDate.of(2003, 1, 1)
-    val maxDate = LocalDate.of(2015, 5, 13)
+    val maxDate = LocalDate.of(2015, 5, 14)
     val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
 
     val urlTemplate = "http://api.sunrise-sunset.org/json?lat=%f&lng=%f&date=%s"
