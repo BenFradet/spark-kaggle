@@ -154,6 +154,13 @@ object SFCrime {
       }
     }
 
+    def dateUDF = udf { (timestamp: String) =>
+      val timestampFormatter = DateTimeFormatter.ofPattern("YYYY-MM-dd HH:mm:ss")
+      val dateFormat = DateTimeFormatter.ofPattern("YYYY-MM-dd")
+      val time = timestampFormatter.parse(timestamp)
+      dateFormat.format(time)
+    }
+
     def dayOrNigthUDF = udf { (timestampUTC: String, sunrise: String, sunset: String) =>
       val timestampFormatter = DateTimeFormatter.ofPattern("YYYY-MM-dd HH:mm:ss")
       val timeFormatter = DateTimeFormatter.ofPattern("h:mm:ss a")
@@ -175,10 +182,10 @@ object SFCrime {
       }
     }
 
-    val Seq(newTrainDF, newPredictDF) = Seq(trainDF, predictDF).map { df =>
+    val Array(newTrainDF, newPredictDF) = Array(trainDF, predictDF).map { df =>
       val dfWithDate = df
         .withColumn("TimestampUTC", to_utc_timestamp(col("Dates"), "PST"))
-        .withColumn("Date", date_format(to_date(col("Dates")), "YYYY-MM-dd"))
+        .withColumn("Date", dateUDF(col("TimestampUTC")))
 
       val dfJoined = dfWithDate
         .join(sunsetDF, dfWithDate("Date") === sunsetDF("date"))
