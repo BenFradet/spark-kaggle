@@ -46,8 +46,7 @@ lazy val sfCrime = project
     "io.circe" %% "circe-generic",
     "io.circe" %% "circe-parser"
   ).map(_ % circeVersion) ++ Seq(
-    "com.twitter" %% "util-core" % "6.34.0",
-    "com.chuusai" %% "shapeless" % "2.3.1"
+    "com.twitter" %% "util-core" % "6.34.0"
   ) ++ Seq(
     "org.slf4j" % "slf4j-api",
     "org.slf4j" % "slf4j-log4j12"
