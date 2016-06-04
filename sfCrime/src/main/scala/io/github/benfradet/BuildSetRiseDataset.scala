@@ -10,6 +10,7 @@ import io.circe.Decoder
 import io.circe.generic.auto._
 import io.circe.parser.decode
 import io.circe.syntax._
+import org.slf4j.LoggerFactory
 
 import scala.collection.mutable
 import scala.io.Source
@@ -35,6 +36,7 @@ object SunSetRise {
  * SF crime dataset.
  */
 object BuildSetRiseDataset {
+  val logger = LoggerFactory.getLogger(getClass)
 
   def main(args: Array[String]): Unit = {
     val sfLat = 37.7749d
@@ -46,7 +48,7 @@ object BuildSetRiseDataset {
 
     val urlTemplate = "http://api.sunrise-sunset.org/json?lat=%f&lng=%f&date=%s"
     val urlsQeueue = mutable.Queue(
-      daysBetween(minDate, maxDate)
+      Util.daysBetween(minDate, maxDate)
         .map { d =>
           val formattedDate = d.format(dateFormatter)
           (formattedDate, urlTemplate.format(sfLat, sfLng, formattedDate))
@@ -74,12 +76,9 @@ object BuildSetRiseDataset {
           } else {
             fileWriter.write(s"$json,\n")
           }
-        case Xor.Left(e) => println(s"error: $e")
+        case Xor.Left(e) => logger.warn("couldn't retrieve sunset/sunrise data", e)
       }
     }
     require(task != null)
   }
-
-  def daysBetween(fromDate: LocalDate, toDate: LocalDate): Seq[LocalDate] =
-    fromDate.toEpochDay.to(toDate.toEpochDay).map(LocalDate.ofEpochDay)
 }
