@@ -1,5 +1,6 @@
 lazy val sparkVersion = "1.6.1"
 lazy val circeVersion = "0.4.1"
+lazy val slf4jVersion = "1.7.21"
 
 lazy val buildSettings = Seq(
   organization := "io.github.benfradet",
@@ -47,4 +48,7 @@ lazy val sfCrime = project
   ).map(_ % circeVersion) ++ Seq(
     "com.twitter" %% "util-core" % "6.34.0",
     "com.chuusai" %% "shapeless" % "2.3.1"
-  ))
+  ) ++ Seq(
+    "org.slf4j" % "slf4j-api",
+    "org.slf4j" % "slf4j-log4j12"
+  ).map(_ % slf4jVersion))
