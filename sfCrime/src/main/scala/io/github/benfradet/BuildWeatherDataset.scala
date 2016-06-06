@@ -50,7 +50,7 @@ object WeatherDataDate {
  * dataset.
  */
 object BuildWeatherDataset {
-  val logger = LoggerFactory.getLogger(getClass)
+  private val logger = LoggerFactory.getLogger(getClass)
 
   def main(args: Array[String]): Unit = {
     val minDate = LocalDate.of(2003, 1, 1)

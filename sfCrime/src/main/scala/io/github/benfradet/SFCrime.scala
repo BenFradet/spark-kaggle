@@ -3,6 +3,10 @@ package io.github.benfradet
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
+import cats.data.Xor
+import com.esri.core.geometry.ogc.OGCGeometry
+import io.circe.generic.auto._
+import io.circe.parser.decode
 import org.apache.log4j.{Logger, Level}
 import org.apache.spark.ml.Pipeline
 import org.apache.spark.ml.classification.{RandomForestClassificationModel, RandomForestClassifier}
@@ -11,20 +15,25 @@ import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{Row, DataFrame, SQLContext}
 import org.apache.spark.{SparkConf, SparkContext}
+import org.slf4j.LoggerFactory
+
+import scala.io.Source
 
 object SFCrime {
 
-  val csvFormat = "com.databricks.spark.csv"
+  private val logger = LoggerFactory.getLogger(getClass)
+  private val csvFormat = "com.databricks.spark.csv"
+  case class Neighborhood(name: String, polygon: String)
 
   def main(args: Array[String]): Unit = {
     Logger.getLogger("org").setLevel(Level.WARN)
 
-    if (args.length < 4) {
-      System.err
-        .println("Usage: SFCrime <train file> <test file> <sunrise/sunset file> <output file>")
+    if (args.length < 6) {
+      System.err.println("Usage: SFCrime <train file> <test file> " +
+        "<sunrise/sunset file> <weather file> <neighborhoods file> <output file>")
       System.exit(1)
     }
-    val Array(trainFile, testFile, sunsetFile, outputFile) = args
+    val Array(trainFile, testFile, sunsetFile, weatherFile, nbhdsFile, outputFile) = args
 
     val sc = new SparkContext(new SparkConf().setAppName("Titanic"))
     val sqlContext = new SQLContext(sc)
@@ -34,19 +43,28 @@ object SFCrime {
       val rdd = sc.wholeTextFiles(sunsetFile).map(_._2)
       sqlContext.read.json(rdd)
     }
+    val weatherDF = {
+      val rdd = sc.wholeTextFiles(weatherFile).map(_._2)
+      sqlContext.read.json(rdd)
+    }
+    val nbhds = decode[Seq[Neighborhood]](Source.fromFile(nbhdsFile).getLines().mkString) match {
+      case Xor.Right(l) => l
+      case Xor.Left(e) =>
+        logger.error("Couldn't parse the neighborhoods file", e)
+        Seq.empty[Neighborhood]
+    }
 
-    // extra features:
-    // - weather:
-    //   min date: 2003-01-01 00:01:00.0, max date: 2015-05-13 23:53:00.0
-
-    val (enrichedTrainDF, enrichedTestDF) = enrichData(rawTrainDF, rawTestDF, sunsetDF)
+    val (enrichedTrainDF, enrichedTestDF) =
+      enrichData(rawTrainDF, rawTestDF, sunsetDF, weatherDF, nbhds)
 
     val labelColName = "Category"
     val predictedLabelColName = "predictedLabel"
     val featuresColName = "Features"
-    val numericFeatColNames = Seq("X", "Y")
+    val numericFeatColNames = Seq("X", "Y", "temperatureC")
     val categoricalFeatColNames = Seq("DayOfWeek", "PdDistrict", "DayOrNight",
-      "Weekend", "HourOfDay", "Month", "Year", "AddressType", "AddressParsed")
+      "Weekend", "HourOfDay", "Month", "Year",
+      "AddressType", "AddressParsed",
+      "weather", "Neighborhood")
 
     val allData = enrichedTrainDF
       .select((numericFeatColNames ++ categoricalFeatColNames).map(col): _*)
@@ -73,7 +91,7 @@ object SFCrime {
     val randomForest = new RandomForestClassifier()
       .setLabelCol(labelColName + "Indexed")
       .setFeaturesCol(featuresColName)
-      .setMaxDepth(11)
+      .setMaxDepth(10)
       .setMaxBins(2089)
       .setImpurity("entropy")
 
@@ -128,7 +146,9 @@ object SFCrime {
   def enrichData(
     trainDF: DataFrame,
     predictDF: DataFrame,
-    sunsetDF: DataFrame
+    sunsetDF: DataFrame,
+    weatherDF: DataFrame,
+    nbhds: Seq[Neighborhood]
   ): (DataFrame, DataFrame) = {
     def addressTypeUDF = udf { (address: String) =>
       if (address contains "/") "Intersection"
@@ -182,6 +202,19 @@ object SFCrime {
       }
     }
 
+    def nbhdUDF = udf { (lat: Double, lng: Double) =>
+      val point = OGCGeometry.fromText(s"POINT($lat $lng)")
+      logger.info(point.asText())
+      nbhds
+        .map(n => (n.name, OGCGeometry.fromText(n.polygon)))
+        .filter { case (name, polygon) => polygon.contains(point) }
+        .map(_._1)
+        .headOption match {
+          case Some(nbhd) => nbhd
+          case None => "SF"
+        }
+    }
+
     val Array(newTrainDF, newPredictDF) = Array(trainDF, predictDF).map { df =>
       val dfWithDate = df
         .withColumn("TimestampUTC", to_utc_timestamp(col("Dates"), "PST"))
@@ -190,6 +223,7 @@ object SFCrime {
       val dfJoined = dfWithDate
         .join(sunsetDF, dfWithDate("Date") === sunsetDF("date"))
         .withColumn("DayOrNight", dayOrNigthUDF(col("TimestampUTC"), col("sunrise"), col("sunset")))
+        .join(weatherDF, dfWithDate("Date") === weatherDF("date"))
 
       dfJoined
         .withColumn("AddressType", addressTypeUDF(col("Address")))
@@ -198,6 +232,7 @@ object SFCrime {
         .withColumn("HourOfDay", hour(col("Dates")))
         .withColumn("Month", month(col("Dates")))
         .withColumn("Year", year(col("Dates")))
+        .withColumn("Neighborhood", nbhdUDF(col("X"), col("Y")))
     }
 
     (newTrainDF, newPredictDF)

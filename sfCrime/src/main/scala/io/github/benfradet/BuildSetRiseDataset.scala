@@ -36,7 +36,7 @@ object SunSetRise {
  * SF crime dataset.
  */
 object BuildSetRiseDataset {
-  val logger = LoggerFactory.getLogger(getClass)
+  private val logger = LoggerFactory.getLogger(getClass)
 
   def main(args: Array[String]): Unit = {
     val sfLat = 37.7749d
