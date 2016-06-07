@@ -44,6 +44,7 @@ object SFCrime {
     val sc = new SparkContext(new SparkConf().setAppName("Titanic"))
     val sqlContext = new SQLContext(sc)
 
+    // data loading
     val (rawTrainDF, rawTestDF) = loadData(trainFile, testFile, sqlContext)
     val sunsetDF = {
       val rdd = sc.wholeTextFiles(sunsetFile).map(_._2)
@@ -60,6 +61,7 @@ object SFCrime {
         Seq.empty[Neighborhood]
     }
 
+    // feature engineering
     val Array(enrichedTrainDF, enrichedTestDF) = Array(rawTrainDF, rawTestDF) map
       (enrichTime andThen
         enrichWeekend andThen
@@ -68,13 +70,14 @@ object SFCrime {
         enrichWeather(weatherDF) andThen
         enrichNeighborhoods(nbhds))
 
+    // building the pipeline
     val labelColName = "Category"
     val predictedLabelColName = "predictedLabel"
     val featuresColName = "Features"
     val numericFeatColNames = Seq("X", "Y", "temperatureC")
     val categoricalFeatColNames = Seq("DayOfWeek", "PdDistrict", "DayOrNight",
       "Weekend", "HourOfDay", "Month", "Year",
-      "AddressType", "AddressParsed",
+      "AddressType", "Street",
       "weather", "Neighborhood")
 
     val allData = enrichedTrainDF
@@ -119,12 +122,14 @@ object SFCrime {
 
     val pipelineModel = pipeline.fit(enrichedTrainDF)
 
+    // checking the importance of each feature
     val featureImportances = pipelineModel.stages(categoricalFeatColNames.size + 2)
       .asInstanceOf[RandomForestClassificationModel].featureImportances
     assembler.getInputCols
       .zip(featureImportances.toArray)
       .foreach { case (feat, imp) => println(s"feature: $feat, importance: $imp") }
 
+    // formatting the results according to Kaggle guidelines
     val labels = enrichedTrainDF.select(labelColName).distinct().collect()
       .map { case Row(label: String) => label }
       .sorted
@@ -145,6 +150,7 @@ object SFCrime {
       labelToVec(r.getAs[String](predictedLabelColName))
     )}
 
+    // saving the results
     sqlContext.createDataFrame(predictionsRDD, schema)
       .drop("predictedLabel")
       .coalesce(1)
@@ -154,6 +160,10 @@ object SFCrime {
       .save(outputFile)
   }
 
+  // add a few time-related features to the original datasets such as:
+  //   - the year
+  //   - the month
+  //   - the hour of day
   val enrichTime = (df: DataFrame) => {
     def dateUDF = udf { (timestamp: String) =>
       val timestampFormatter = DateTimeFormatter.ofPattern("YYYY-MM-dd HH:mm:ss")
@@ -170,6 +180,7 @@ object SFCrime {
       .withColumn("Date", dateUDF(col("TimestampUTC")))
   }
 
+  // add a weekend feature telling whether or not the crime incident occurred on a weekend
   val enrichWeekend = (df: DataFrame) => {
     def weekendUDF = udf { (dayOfWeek: String) =>
       dayOfWeek match {
@@ -180,6 +191,9 @@ object SFCrime {
     df.withColumn("Weekend", weekendUDF(col("DayOfWeek")))
   }
 
+  // add address-related features:
+  //   - whether or not the crime incident occurred at an intersection
+  //   - a street feature which is the street corresponding to the parsed address
   val enrichAddress = (df: DataFrame) => {
     def addressTypeUDF = udf { (address: String) =>
       if (address contains "/") "Intersection"
@@ -199,9 +213,10 @@ object SFCrime {
     }
     df
       .withColumn("AddressType", addressTypeUDF(col("Address")))
-      .withColumn("AddressParsed", addressUDF(col("Address")))
+      .withColumn("Street", addressUDF(col("Address")))
   }
 
+  // add a day or night feature based on sunrise and sunset times
   def enrichDayOrNight(sunsetDF: DataFrame)(df: DataFrame) = {
     def dayOrNigthUDF = udf { (timestampUTC: String, sunrise: String, sunset: String) =>
       val timestampFormatter = DateTimeFormatter.ofPattern("YYYY-MM-dd HH:mm:ss")
@@ -229,6 +244,9 @@ object SFCrime {
       .withColumn("DayOrNight", dayOrNigthUDF(col("TimestampUTC"), col("sunrise"), col("sunset")))
   }
 
+  // add weather-related features:
+  //   - the average temperature of the day
+  //   - the most occurring weather condition
   def enrichWeather(weatherDF: DataFrame)(df: DataFrame) =
     df.join(weatherDF, df("Date") === weatherDF("date"))
 
