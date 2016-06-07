@@ -62,13 +62,10 @@ object SFCrime {
     }
 
     // feature engineering
-    val Array(enrichedTrainDF, enrichedTestDF) = Array(rawTrainDF, rawTestDF) map
-      (enrichTime andThen
-        enrichWeekend andThen
-        enrichAddress andThen
-        enrichDayOrNight(sunsetDF) andThen
-        enrichWeather(weatherDF) andThen
-        enrichNeighborhoods(nbhds))
+    val enrichFunctions = List(enrichTime, enrichWeekend, enrichAddress,
+      enrichDayOrNight(sunsetDF)(_), enrichWeather(weatherDF)(_), enrichNeighborhoods(nbhds)(_))
+    val Array(enrichedTrainDF, enrichedTestDF) =
+      Array(rawTrainDF, rawTestDF) map (enrichFunctions reduce (_ andThen _))
 
     // building the pipeline
     val labelColName = "Category"
