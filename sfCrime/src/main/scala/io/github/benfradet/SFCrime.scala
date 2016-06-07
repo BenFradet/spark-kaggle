@@ -4,10 +4,9 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
 import cats.data.Xor
-import com.esri.core.geometry.ogc.OGCGeometry
-import io.circe.generic.auto._
+import com.esri.core.geometry._
+import io.circe.Decoder
 import io.circe.parser.decode
-import org.apache.log4j.{Logger, Level}
 import org.apache.spark.ml.Pipeline
 import org.apache.spark.ml.classification.{RandomForestClassificationModel, RandomForestClassifier}
 import org.apache.spark.ml.feature.{IndexToString, VectorAssembler, StringIndexer}
@@ -23,11 +22,18 @@ object SFCrime {
 
   private val logger = LoggerFactory.getLogger(getClass)
   private val csvFormat = "com.databricks.spark.csv"
-  case class Neighborhood(name: String, polygon: String)
+
+  case class Neighborhood(name: String, polygon: Polygon)
+  object Neighborhood {
+    implicit val decodeNbhd: Decoder[Neighborhood] = Decoder.instance { c =>
+      for {
+        name <- c.downField("name").as[String]
+        poly <- c.downField("polygon").as[String]
+      } yield Neighborhood(name, createPolygonFromWKT(poly))
+    }
+  }
 
   def main(args: Array[String]): Unit = {
-    Logger.getLogger("org").setLevel(Level.WARN)
-
     if (args.length < 6) {
       System.err.println("Usage: SFCrime <train file> <test file> " +
         "<sunrise/sunset file> <weather file> <neighborhoods file> <output file>")
@@ -228,16 +234,14 @@ object SFCrime {
 
   def enrichNeighborhoods(nbhds: Seq[Neighborhood])(df: DataFrame) = {
     def nbhdUDF = udf { (lat: Double, lng: Double) =>
-      val point = OGCGeometry.fromText(s"POINT($lat $lng)")
-      logger.info(point.asText())
+      val point = createPointFromWKT(s"POINT($lat $lng)")
       nbhds
-        .map(n => (n.name, OGCGeometry.fromText(n.polygon)))
-        .filter { case (name, polygon) => polygon.contains(point) }
-        .map(_._1)
+        .filter(nbhd => contains(nbhd.polygon, point))
+        .map(_.name)
         .headOption match {
-        case Some(nbhd) => nbhd
-        case None => "SF"
-      }
+          case Some(nbhd) => nbhd
+          case None => "SF"
+        }
     }
     df
       .withColumn("Neighborhood", nbhdUDF(col("X"), col("Y")))
@@ -280,4 +284,19 @@ object SFCrime {
 
     (trainDF, testDF)
   }
+
+  def createPolygonFromWKT(wkt: String): Polygon = {
+    val geom = OperatorImportFromWkt.local()
+      .execute(WktImportFlags.wktImportDefaults, Geometry.Type.Polygon, wkt, null)
+    geom.asInstanceOf[Polygon]
+  }
+
+  def createPointFromWKT(wkt: String): Point = {
+    val geom = OperatorImportFromWkt.local()
+      .execute(WktImportFlags.wktImportDefaults, Geometry.Type.Point, wkt, null)
+    geom.asInstanceOf[Point]
+  }
+
+  def contains(container: Geometry, contained: Geometry) =
+    OperatorContains.local().execute(container, contained, SpatialReference.create(3426), null)
 }

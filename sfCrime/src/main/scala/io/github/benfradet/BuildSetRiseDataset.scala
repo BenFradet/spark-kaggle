@@ -22,7 +22,6 @@ sealed trait SunSetRiseTrait {
 case class SunSetRise(sunrise: Option[String], sunset: Option[String]) extends SunSetRiseTrait
 case class SunSetRiseDate(date: String, sunrise: Option[String], sunset: Option[String])
   extends SunSetRiseTrait
-
 object SunSetRise {
   implicit val decodeSunSetRise: Decoder[SunSetRise] = Decoder.instance { c =>
     for {
