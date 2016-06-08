@@ -41,7 +41,7 @@ object SFCrime {
     }
     val Array(trainFile, testFile, sunsetFile, weatherFile, nbhdsFile, outputFile) = args
 
-    val sc = new SparkContext(new SparkConf().setAppName("Titanic"))
+    val sc = new SparkContext(new SparkConf().setAppName("SFCrime"))
     val sqlContext = new SQLContext(sc)
 
     // data loading
