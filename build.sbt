@@ -10,10 +10,8 @@ lazy val buildSettings = Seq(
     "org.apache.spark" %% "spark-core",
     "org.apache.spark" %% "spark-mllib",
     "org.apache.spark" %% "spark-sql"
-  ).map(_ % sparkVersion % "provided") ++ Seq(
-    "com.databricks" %% "spark-csv" % "1.4.0",
-    "com.github.fommil.netlib" % "all" % "1.1.2" pomOnly()
-  )
+  ).map(_ % sparkVersion % "provided") :+
+    "com.databricks" %% "spark-csv" % "1.4.0"
 )
 
 lazy val compilerOptions = Seq(
