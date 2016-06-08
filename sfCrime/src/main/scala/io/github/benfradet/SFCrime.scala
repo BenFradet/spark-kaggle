@@ -7,9 +7,11 @@ import cats.data.Xor
 import com.esri.core.geometry._
 import io.circe.Decoder
 import io.circe.parser.decode
-import org.apache.spark.ml.Pipeline
+import org.apache.spark.ml.{PipelineModel, Pipeline}
 import org.apache.spark.ml.classification.{RandomForestClassificationModel, RandomForestClassifier}
+import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
 import org.apache.spark.ml.feature.{IndexToString, VectorAssembler, StringIndexer}
+import org.apache.spark.ml.tuning.{CrossValidator, ParamGridBuilder}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{Row, DataFrame, SQLContext}
@@ -72,10 +74,10 @@ object SFCrime {
     val predictedLabelColName = "predictedLabel"
     val featuresColName = "Features"
     val numericFeatColNames = Seq("X", "Y", "temperatureC")
-    val categoricalFeatColNames = Seq("DayOfWeek", "PdDistrict", "DayOrNight",
-      "Weekend", "HourOfDay", "Month", "Year",
-      "AddressType", "Street",
-      "weather", "Neighborhood")
+    val categoricalFeatColNames = Seq(
+      "DayOfWeek", "PdDistrict", "DayOrNight", "Weekend", "HourOfDay", "Month", "Year",
+      "AddressType", "Street", "weather", "Neighborhood"
+    )
 
     val allData = enrichedTrainDF
       .select((numericFeatColNames ++ categoricalFeatColNames).map(col): _*)
@@ -104,7 +106,6 @@ object SFCrime {
       .setFeaturesCol(featuresColName)
       .setMaxDepth(10)
       .setMaxBins(2089)
-      .setImpurity("entropy")
 
     val indexToString = new IndexToString()
       .setInputCol("prediction")
@@ -117,14 +118,36 @@ object SFCrime {
         Array(labelIndexer, assembler, randomForest, indexToString)
       ))
 
-    val pipelineModel = pipeline.fit(enrichedTrainDF)
+    val evaluator = new MulticlassClassificationEvaluator()
+      .setLabelCol(labelColName + "Indexed")
+
+    val paramGrid = new ParamGridBuilder()
+      .addGrid(randomForest.impurity, Array("entropy", "gini"))
+      .build()
+
+    val cv = new CrossValidator()
+      .setEstimator(pipeline)
+      .setEvaluator(evaluator)
+      .setEstimatorParamMaps(paramGrid)
+      .setNumFolds(3)
+
+    val cvModel = cv.fit(enrichedTrainDF)
 
     // checking the importance of each feature
-    val featureImportances = pipelineModel.stages(categoricalFeatColNames.size + 2)
+    val featureImportances = cvModel
+      .bestModel.asInstanceOf[PipelineModel]
+      .stages(categoricalFeatColNames.size + 2)
       .asInstanceOf[RandomForestClassificationModel].featureImportances
     assembler.getInputCols
       .zip(featureImportances.toArray)
       .foreach { case (feat, imp) => println(s"feature: $feat, importance: $imp") }
+
+    // retrieving the best model's param
+    val bestEstimatorParamMap = cvModel.getEstimatorParamMaps
+      .zip(cvModel.avgMetrics)
+      .maxBy(_._2)
+      ._1
+    println(bestEstimatorParamMap)
 
     // formatting the results according to Kaggle guidelines
     val labels = enrichedTrainDF.select(labelColName).distinct().collect()
@@ -137,7 +160,7 @@ object SFCrime {
       array.toSeq
     }
 
-    val predictions = pipelineModel
+    val predictions = cvModel
       .transform(enrichedTestDF)
       .select("Id", predictedLabelColName)
 
