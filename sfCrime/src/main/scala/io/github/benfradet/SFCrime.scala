@@ -131,7 +131,13 @@ object SFCrime {
       .setEstimatorParamMaps(paramGrid)
       .setNumFolds(3)
 
+    // training the model
     val cvModel = cv.fit(enrichedTrainDF)
+
+    // making predictions
+    val predictions = cvModel
+      .transform(enrichedTestDF)
+      .select("Id", predictedLabelColName)
 
     // checking the importance of each feature
     val featureImportances = cvModel
@@ -160,18 +166,17 @@ object SFCrime {
       array.toSeq
     }
 
-    val predictions = cvModel
-      .transform(enrichedTestDF)
-      .select("Id", predictedLabelColName)
-
     val schema = StructType(predictions.schema.fields ++ labels.map(StructField(_, IntegerType)))
-    val predictionsRDD = predictions.rdd.map { r => Row.fromSeq(
-      r.toSeq ++
-      labelToVec(r.getAs[String](predictedLabelColName))
-    )}
+    val resultDF = sqlContext.createDataFrame(
+      predictions.rdd.map { r => Row.fromSeq(
+        r.toSeq ++
+          labelToVec(r.getAs[String](predictedLabelColName))
+      )},
+      schema
+    )
 
     // saving the results
-    sqlContext.createDataFrame(predictionsRDD, schema)
+    resultDF
       .drop("predictedLabel")
       .coalesce(1)
       .write
@@ -237,7 +242,7 @@ object SFCrime {
   }
 
   // add a day or night feature based on sunrise and sunset times
-  def enrichDayOrNight(sunsetDF: DataFrame)(df: DataFrame) = {
+  def enrichDayOrNight(sunsetDF: DataFrame)(df: DataFrame): DataFrame = {
     def dayOrNigthUDF = udf { (timestampUTC: String, sunrise: String, sunset: String) =>
       val timestampFormatter = DateTimeFormatter.ofPattern("YYYY-MM-dd HH:mm:ss")
       val timeFormatter = DateTimeFormatter.ofPattern("h:mm:ss a")
@@ -267,10 +272,10 @@ object SFCrime {
   // add weather-related features:
   //   - the average temperature of the day
   //   - the most occurring weather condition
-  def enrichWeather(weatherDF: DataFrame)(df: DataFrame) =
+  def enrichWeather(weatherDF: DataFrame)(df: DataFrame): DataFrame =
     df.join(weatherDF, df("Date") === weatherDF("date"))
 
-  def enrichNeighborhoods(nbhds: Seq[Neighborhood])(df: DataFrame) = {
+  def enrichNeighborhoods(nbhds: Seq[Neighborhood])(df: DataFrame): DataFrame = {
     def nbhdUDF = udf { (lat: Double, lng: Double) =>
       val point = createPointFromWKT(s"POINT($lat $lng)")
       nbhds
@@ -281,8 +286,7 @@ object SFCrime {
           case None => "SF"
         }
     }
-    df
-      .withColumn("Neighborhood", nbhdUDF(col("X"), col("Y")))
+    df.withColumn("Neighborhood", nbhdUDF(col("X"), col("Y")))
   }
 
   def loadData(
@@ -335,6 +339,6 @@ object SFCrime {
     geom.asInstanceOf[Point]
   }
 
-  def contains(container: Geometry, contained: Geometry) =
+  def contains(container: Geometry, contained: Geometry): Boolean =
     OperatorContains.local().execute(container, contained, SpatialReference.create(3426), null)
 }
