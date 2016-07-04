@@ -31,7 +31,7 @@ object SFCrime {
       for {
         name <- c.downField("name").as[String]
         poly <- c.downField("polygon").as[String]
-      } yield Neighborhood(name, createPolygonFromWKT(poly))
+      } yield Neighborhood(name, createGeometryFromWKT[Polygon](poly))
     }
   }
 
@@ -277,7 +277,7 @@ object SFCrime {
 
   def enrichNeighborhoods(nbhds: Seq[Neighborhood])(df: DataFrame): DataFrame = {
     def nbhdUDF = udf { (lat: Double, lng: Double) =>
-      val point = createPointFromWKT(s"POINT($lat $lng)")
+      val point = createGeometryFromWKT[Point](s"POINT($lat $lng)")
       nbhds
         .filter(nbhd => contains(nbhd.polygon, point))
         .map(_.name)
@@ -327,16 +327,11 @@ object SFCrime {
     (trainDF, testDF)
   }
 
-  def createPolygonFromWKT(wkt: String): Polygon = {
-    val geom = OperatorImportFromWkt.local()
-      .execute(WktImportFlags.wktImportDefaults, Geometry.Type.Polygon, wkt, null)
-    geom.asInstanceOf[Polygon]
-  }
-
-  def createPointFromWKT(wkt: String): Point = {
-    val geom = OperatorImportFromWkt.local()
-      .execute(WktImportFlags.wktImportDefaults, Geometry.Type.Point, wkt, null)
-    geom.asInstanceOf[Point]
+  def createGeometryFromWKT[T <: Geometry](wkt: String): T = {
+    val wktImportFlags = WktImportFlags.wktImportDefaults
+    val geometryType = Geometry.Type.Unknown
+    val g = OperatorImportFromWkt.local().execute(wktImportFlags, geometryType, wkt, null)
+    g.asInstanceOf[T]
   }
 
   def contains(container: Geometry, contained: Geometry): Boolean =
