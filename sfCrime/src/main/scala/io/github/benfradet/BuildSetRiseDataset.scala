@@ -4,7 +4,7 @@ import java.io.FileWriter
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-import cats.data.Xor
+import cats.syntax.either._
 import com.twitter.util.{TimerTask, Duration, JavaTimer}
 import io.circe.Decoder
 import io.circe.generic.auto._
@@ -64,7 +64,7 @@ object BuildSetRiseDataset {
       val sunSetRise = decode[SunSetRise](Source.fromURL(url).mkString)
         .map(s => SunSetRiseDate(date, s.sunrise, s.sunset))
       sunSetRise match {
-        case Xor.Right(s) =>
+        case Right(s) =>
           val json = s.asJson.spaces2
           if (urlsQeueue.isEmpty) {
             task.cancel()
@@ -75,7 +75,7 @@ object BuildSetRiseDataset {
           } else {
             fileWriter.write(s"$json,\n")
           }
-        case Xor.Left(e) => logger.warn("couldn't retrieve sunset/sunrise data", e)
+        case Left(e) => logger.warn("couldn't retrieve sunset/sunrise data", e)
       }
     }
     require(task != null)

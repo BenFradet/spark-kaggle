@@ -1,5 +1,5 @@
-lazy val sparkVersion = "1.6.1"
-lazy val circeVersion = "0.4.1"
+lazy val sparkVersion = "2.0.2"
+lazy val circeVersion = "0.6.1"
 lazy val slf4jVersion = "1.7.21"
 
 lazy val buildSettings = Seq(
@@ -10,8 +10,7 @@ lazy val buildSettings = Seq(
     "org.apache.spark" %% "spark-core",
     "org.apache.spark" %% "spark-mllib",
     "org.apache.spark" %% "spark-sql"
-  ).map(_ % sparkVersion % "provided") :+
-    "com.databricks" %% "spark-csv" % "1.4.0",
+  ).map(_ % sparkVersion % "provided"),
   scalacOptions ++= compilerOptions
 )
 

@@ -6,14 +6,11 @@ import org.apache.spark.ml.classification.RandomForestClassifier
 import org.apache.spark.ml.evaluation.BinaryClassificationEvaluator
 import org.apache.spark.ml.feature.{IndexToString, VectorAssembler, StringIndexer}
 import org.apache.spark.ml.tuning.{CrossValidator, ParamGridBuilder}
-import org.apache.spark.{SparkConf, SparkContext}
-import org.apache.spark.sql.{DataFrame, Row, SQLContext}
+import org.apache.spark.sql.{SparkSession, DataFrame, Row}
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.functions._
 
 object Titanic {
-
-  val csvFormat = "com.databricks.spark.csv"
 
   def main(args: Array[String]): Unit = {
     Logger.getLogger("org").setLevel(Level.WARN)
@@ -23,10 +20,13 @@ object Titanic {
       System.exit(1)
     }
 
-    val sc = new SparkContext(new SparkConf().setAppName("Titanic"))
-    val sqlContext = new SQLContext(sc)
+    val spark = SparkSession
+      .builder()
+      .appName("Titanic")
+      .getOrCreate()
+    import spark.implicits._
 
-    val (dataDFRaw, predictDFRaw) = loadData(args(0), args(1), sqlContext)
+    val (dataDFRaw, predictDFRaw) = loadData(args(0), args(1), spark)
 
     val (dataDFExtra, predictDFExtra) = createExtraFeatures(dataDFRaw, predictDFRaw)
 
@@ -47,7 +47,7 @@ object Titanic {
     val dataDFFiltered = dataDFCompleted.select(labelColName, allPredictColNames: _*)
     val predictDFFiltered = predictDFCompleted.select(labelColName, allPredictColNames: _*)
 
-    val allData = dataDFFiltered.unionAll(predictDFFiltered)
+    val allData = dataDFFiltered.union(predictDFFiltered)
     allData.cache()
 
     val stringIndexers = categoricalFeatColNames.map { colName =>
@@ -80,10 +80,8 @@ object Titanic {
       .setLabels(labelIndexer.labels)
 
     // define the order of the operations to be performed
-    val pipeline = new Pipeline().setStages(Array.concat(
-      stringIndexers.toArray,
-      Array(labelIndexer, assembler, randomForest, labelConverter)
-    ))
+    val pipeline = new Pipeline().setStages(
+      (stringIndexers :+ labelIndexer :+ assembler :+ randomForest :+ labelConverter).toArray)
 
     // grid of values to perform cross validation on
     val paramGrid = new ParamGridBuilder()
@@ -112,7 +110,7 @@ object Titanic {
       .select("PassengerId", "Survived")
       .coalesce(1)
       .write
-      .format(csvFormat)
+      .format("csv")
       .option("header", "true")
       .save(args(2))
   }
@@ -120,7 +118,7 @@ object Titanic {
   def fillNAValues(trainDF: DataFrame, testDF: DataFrame): (DataFrame, DataFrame) = {
     // TODO: train a model on the age column
     // fill empty values for the age column
-    val avgAge = trainDF.select("Age").unionAll(testDF.select("Age"))
+    val avgAge = trainDF.select("Age").union(testDF.select("Age"))
       .agg(avg("Age"))
       .collect() match {
         case Array(Row(avg: Double)) => avg
@@ -128,7 +126,7 @@ object Titanic {
       }
 
     // fill empty values for the fare column
-    val avgFare = trainDF.select("Fare").unionAll(testDF.select("Fare"))
+    val avgFare = trainDF.select("Fare").union(testDF.select("Fare"))
       .agg(avg("Fare"))
       .collect() match {
         case Array(Row(avg: Double)) => avg
@@ -208,7 +206,7 @@ object Titanic {
   def loadData(
     trainFile: String,
     testFile: String,
-    sqlContext: SQLContext
+    spark: SparkSession
   ): (DataFrame, DataFrame) = {
     val nullable = true
     val schemaArray = Array(
@@ -229,14 +227,14 @@ object Titanic {
     val trainSchema = StructType(schemaArray)
     val testSchema = StructType(schemaArray.filter(p => p.name != "Survived"))
 
-    val trainDF = sqlContext.read
-      .format(csvFormat)
+    val trainDF = spark.read
+      .format("csv")
       .option("header", "true")
       .schema(trainSchema)
       .load(trainFile)
 
-    val testDF = sqlContext.read
-      .format(csvFormat)
+    val testDF = spark.read
+      .format("csv")
       .option("header", "true")
       .schema(testSchema)
       .load(testFile)

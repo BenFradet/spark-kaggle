@@ -3,7 +3,7 @@ package io.github.benfradet
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
-import cats.data.Xor
+import cats.syntax.either._
 import com.esri.core.geometry._
 import io.circe.Decoder
 import io.circe.parser.decode
@@ -14,8 +14,7 @@ import org.apache.spark.ml.feature.{IndexToString, VectorAssembler, StringIndexe
 import org.apache.spark.ml.tuning.{CrossValidator, ParamGridBuilder}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.{Row, DataFrame, SQLContext}
-import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.sql.{SparkSession, Row, DataFrame}
 import org.slf4j.LoggerFactory
 
 import scala.io.Source
@@ -23,7 +22,6 @@ import scala.io.Source
 object SFCrime {
 
   private val logger = LoggerFactory.getLogger(getClass)
-  private val csvFormat = "com.databricks.spark.csv"
 
   case class Neighborhood(name: String, polygon: Polygon)
   object Neighborhood {
@@ -43,22 +41,25 @@ object SFCrime {
     }
     val Array(trainFile, testFile, sunsetFile, weatherFile, nbhdsFile, outputFile) = args
 
-    val sc = new SparkContext(new SparkConf().setAppName("SFCrime"))
-    val sqlContext = new SQLContext(sc)
+    val spark = SparkSession
+      .builder()
+      .appName("SFCrime")
+      .getOrCreate()
+    import spark.implicits._
 
     // data loading
-    val (rawTrainDF, rawTestDF) = loadData(trainFile, testFile, sqlContext)
+    val (rawTrainDF, rawTestDF) = loadData(trainFile, testFile, spark)
     val sunsetDF = {
-      val rdd = sc.wholeTextFiles(sunsetFile).map(_._2)
-      sqlContext.read.json(rdd)
+      val rdd = spark.sparkContext.wholeTextFiles(sunsetFile).map(_._2)
+      spark.read.json(rdd)
     }
     val weatherDF = {
-      val rdd = sc.wholeTextFiles(weatherFile).map(_._2)
-      sqlContext.read.json(rdd)
+      val rdd = spark.sparkContext.wholeTextFiles(weatherFile).map(_._2)
+      spark.read.json(rdd)
     }
     val nbhds = decode[Seq[Neighborhood]](Source.fromFile(nbhdsFile).getLines().mkString) match {
-      case Xor.Right(l) => l
-      case Xor.Left(e) =>
+      case Right(l) => l
+      case Left(e) =>
         logger.error("Couldn't parse the neighborhoods file", e)
         Seq.empty[Neighborhood]
     }
@@ -81,7 +82,7 @@ object SFCrime {
 
     val allData = enrichedTrainDF
       .select((numericFeatColNames ++ categoricalFeatColNames).map(col): _*)
-      .unionAll(enrichedTestDF
+      .union(enrichedTestDF
         .select((numericFeatColNames ++ categoricalFeatColNames).map(col): _*))
     allData.cache()
 
@@ -112,11 +113,8 @@ object SFCrime {
       .setOutputCol(predictedLabelColName)
       .setLabels(labelIndexer.labels)
 
-    val pipeline = new Pipeline()
-      .setStages(Array.concat(
-        stringIndexers.toArray,
-        Array(labelIndexer, assembler, randomForest, indexToString)
-      ))
+    val pipeline = new Pipeline().setStages(
+      (stringIndexers :+ labelIndexer :+ assembler :+ randomForest :+ indexToString).toArray)
 
     val evaluator = new MulticlassClassificationEvaluator()
       .setLabelCol(labelColName + "Indexed")
@@ -167,7 +165,7 @@ object SFCrime {
     }
 
     val schema = StructType(predictions.schema.fields ++ labels.map(StructField(_, IntegerType)))
-    val resultDF = sqlContext.createDataFrame(
+    val resultDF = spark.createDataFrame(
       predictions.rdd.map { r => Row.fromSeq(
         r.toSeq ++
           labelToVec(r.getAs[String](predictedLabelColName))
@@ -180,7 +178,7 @@ object SFCrime {
       .drop("predictedLabel")
       .coalesce(1)
       .write
-      .format(csvFormat)
+      .format("csv")
       .option("header", "true")
       .save(outputFile)
   }
@@ -292,7 +290,7 @@ object SFCrime {
   def loadData(
     trainFile: String,
     testFile: String,
-    sqlContext: SQLContext
+    spark: SparkSession
   ): (DataFrame, DataFrame) = {
     val schemaArray = Array(
       StructField("Id", LongType),
@@ -312,14 +310,14 @@ object SFCrime {
       Seq("Category", "Descript", "Resolution") contains p.name
     })
 
-    val trainDF = sqlContext.read
-      .format(csvFormat)
+    val trainDF = spark.read
+      .format("csv")
       .option("header", "true")
       .schema(trainSchema)
       .load(trainFile)
 
-    val testDF = sqlContext.read
-      .format(csvFormat)
+    val testDF = spark.read
+      .format("csv")
       .option("header", "true")
       .schema(testSchema)
       .load(testFile)
