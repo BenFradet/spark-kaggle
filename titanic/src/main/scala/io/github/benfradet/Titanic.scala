@@ -136,7 +136,8 @@ object Titanic {
     // map to fill na values
     val fillNAMap = Map(
       "Fare"     -> avgFare,
-      "Age"      -> avgAge
+      "Age"      -> avgAge,
+      "Embarked" -> "S"
     )
 
     // udf to fill empty embarked string with S corresponding to Southampton
