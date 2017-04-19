@@ -1,4 +1,4 @@
-lazy val sparkVersion = "2.0.2"
+lazy val sparkVersion = "2.1.0"
 lazy val circeVersion = "0.6.1"
 lazy val slf4jVersion = "1.7.21"
 
