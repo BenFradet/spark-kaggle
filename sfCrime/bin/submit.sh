@@ -30,7 +30,7 @@ spark-submit \
   target/scala-2.11/sfCrime-assembly-1.0.jar \
   ${TRAIN_PATH} ${TEST_PATH} ${SUNSET_PATH} ${WEATHER_PATH} ${NBHD_PATH} ${OUTPUT}
 
-mv ${OUTPUT}/part-00000 ${TMP_FILE}
+mv ${OUTPUT}/part-* ${TMP_FILE}
 rm -rf ${OUTPUT}
 mv ${TMP_FILE} ${OUTPUT}
 rm -rf ${TRAIN_PATH} ${TEST_PATH}

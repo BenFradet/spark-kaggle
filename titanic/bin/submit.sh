@@ -16,6 +16,6 @@ spark-submit \
   target/scala-2.11/titanic-assembly-1.0.jar \
   src/main/resources/train.csv src/main/resources/test.csv ${OUTPUT}
 
-mv ${OUTPUT}/part-00000 ${TMP_FILE}
+mv ${OUTPUT}/part-* ${TMP_FILE}
 rm -rf ${OUTPUT}
 mv ${TMP_FILE} ${OUTPUT}
